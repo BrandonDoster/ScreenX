@@ -35,31 +35,63 @@ const $ = (id) => document.getElementById(id);
 
 // ------------------------------------------------------------ accelerators
 
-const KEY_ALIASES = {
-  ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-  Escape: 'Esc', Enter: 'Return', '+': 'Plus'
+const IS_MAC = navigator.userAgent.includes('Mac OS X');
+
+// Physical keys, so a shifted key still records as the key that was pressed
+// rather than the symbol it produced.
+const CODE_KEYS = {
+  Space: 'Space', Tab: 'Tab', Enter: 'Return', NumpadEnter: 'Return',
+  Backspace: 'Backspace', Delete: 'Delete', Insert: 'Insert', Escape: 'Esc',
+  Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+  Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Backquote: '`',
+  NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult',
+  NumpadDivide: 'numdiv', NumpadDecimal: 'numdec'
 };
 
+function keyName(event) {
+  const code = event.code || '';
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit\d$/.test(code)) return code.slice(5);
+  if (/^Numpad\d$/.test(code)) return `num${code.slice(6)}`;
+  if (/^F\d{1,2}$/.test(code)) return code;
+  if (CODE_KEYS[code]) return CODE_KEYS[code];
+  // Layouts the code table does not cover fall back to the produced character.
+  const key = event.key;
+  return key && key.length === 1 ? key.toUpperCase() : null;
+}
+
 function toAccelerator(event) {
+  const key = keyName(event);
+  if (!key) return null;
+
+  // Modifiers are recorded literally. CommandOrControl would quietly turn a
+  // Control press into Command on macOS, registering a different shortcut than
+  // the one the user pressed.
   const parts = [];
-  if (event.metaKey || event.ctrlKey) {
-    // One portable modifier keeps the same settings file usable on both platforms.
-    parts.push(event.metaKey && event.ctrlKey ? 'Control' : 'CommandOrControl');
-    if (event.metaKey && event.ctrlKey) parts.push('Command');
-  }
+  if (event.ctrlKey) parts.push('Control');
+  if (event.metaKey) parts.push(IS_MAC ? 'Command' : 'Super');
   if (event.altKey) parts.push('Alt');
   if (event.shiftKey) parts.push('Shift');
+  // A global hotkey without a modifier would swallow the key system-wide.
+  if (!parts.length) return null;
 
-  let key = event.key;
-  if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return null;
-  key = KEY_ALIASES[key] || key;
-  if (key.length === 1) key = key.toUpperCase();
-  // Shifted punctuation comes through as the symbol; the physical key is safer.
-  if (/^Digit(\d)$/.test(event.code) && key.length === 1 && !/[0-9]/.test(key)) {
-    key = event.code.slice(5);
-  }
   parts.push(key);
-  return parts.length > 1 ? parts.join('+') : null;
+  return parts.join('+');
+}
+
+const MAC_SYMBOLS = {
+  CommandOrControl: '⌘', Command: '⌘', Cmd: '⌘', Control: '⌃', Ctrl: '⌃',
+  Alt: '⌥', Option: '⌥', Shift: '⇧'
+};
+
+/** macOS users read ⌃⇧Q far faster than Control+Shift+Q. */
+function displayAccelerator(accelerator) {
+  if (!accelerator || !IS_MAC) return accelerator || '';
+  const parts = accelerator.split('+');
+  const key = parts.pop();
+  return parts.map((p) => MAC_SYMBOLS[p] || `${p}+`).join('') + key;
 }
 
 // ------------------------------------------------------------------- forms
@@ -92,7 +124,8 @@ function renderHotkeys() {
     input.className = 'hotkey mono';
     input.readOnly = true;
     input.dataset.hotkey = name;
-    input.value = state.hotkeys[name] || '';
+    input.value = displayAccelerator(state.hotkeys[name]);
+    input.title = state.hotkeys[name] || '';
     input.placeholder = 'Not set';
     inputCell.appendChild(input);
 
@@ -104,6 +137,7 @@ function renderHotkeys() {
     clear.addEventListener('click', () => {
       state.hotkeys[name] = '';
       input.value = '';
+      input.title = '';
       checkDuplicates();
     });
     clearCell.appendChild(clear);
@@ -241,7 +275,8 @@ document.addEventListener('focusin', (e) => {
 document.addEventListener('focusout', (e) => {
   if (e.target !== listeningFor) return;
   listeningFor.classList.remove('listening');
-  listeningFor.value = state.hotkeys[listeningFor.dataset.hotkey] || '';
+  listeningFor.value = displayAccelerator(state.hotkeys[listeningFor.dataset.hotkey]);
+  listeningFor.title = state.hotkeys[listeningFor.dataset.hotkey] || '';
   listeningFor = null;
 });
 

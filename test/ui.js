@@ -20,6 +20,23 @@ const problems = [];
 function step(name) { process.stdout.write(`  ${name}... `); }
 function ok(extra) { console.log(`ok${extra ? ` (${extra})` : ''}`); }
 
+/** A dark image with one bright rectangle, standing in for a window. */
+function windowImage(width, height, box) {
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const inside = x >= box.x && x < box.x + box.width && y >= box.y && y < box.y + box.height;
+      const value = inside ? 205 : 28;
+      pixels[i] = value;
+      pixels[i + 1] = value;
+      pixels[i + 2] = value;
+      pixels[i + 3] = 255;
+    }
+  }
+  return nativeImage.createFromBuffer(pixels, { width, height });
+}
+
 /** A 200x150 test image: red left half, blue right half. */
 function testImage() {
   const width = 200;
@@ -129,6 +146,87 @@ async function testOverlay() {
   await cancelled;
   win2.destroy();
   ok();
+
+  // Front-most first, and deliberately overlapping so ordering has to matter.
+  const back = { x: 60, y: 40, width: 420, height: 300 };
+  const front = { x: 200, y: 150, width: 260, height: 200 };
+  const windowList = [
+    { title: 'Front Window', rect: front },
+    { title: 'Back Window', rect: back }
+  ];
+
+  async function overlayWithWindows(displayId) {
+    const win = await open('overlay.html', 'overlay-preload.js', { width: 640, height: 460 });
+    const view = await win.webContents.executeJavaScript(
+      '({ width: window.innerWidth, height: window.innerHeight })'
+    );
+    win.webContents.send('overlay:init', {
+      displayId,
+      mode: 'screenshot',
+      dataURL: windowImage(view.width, view.height, back).toDataURL(),
+      scaleFactor: 1,
+      bounds: {},
+      windows: windowList
+    });
+    await wait(250);
+    return win;
+  }
+
+  step('overlay highlights the window under the pointer');
+  const win3 = await overlayWithWindows(3);
+  const grabbed = expect('overlay:select');
+
+  // A point inside the back window only.
+  await mouse(win3, 'mousemove', 100, 80);
+  let highlight = await win3.webContents.executeJavaScript('({ rect: snapped && {...snapped}, title: snapTitle })');
+  assert.deepStrictEqual(highlight.rect, back, `expected the back window, got ${JSON.stringify(highlight)}`);
+  assert.strictEqual(highlight.title, 'Back Window');
+
+  // A point inside both: the front-most one wins.
+  await mouse(win3, 'mousemove', 300, 250);
+  highlight = await win3.webContents.executeJavaScript('({ rect: snapped && {...snapped}, title: snapTitle })');
+  assert.deepStrictEqual(highlight.rect, front, `expected the front window, got ${JSON.stringify(highlight)}`);
+  assert.strictEqual(highlight.title, 'Front Window');
+
+  // A point outside every window: nothing to highlight.
+  await mouse(win3, 'mousemove', 600, 430);
+  highlight = await win3.webContents.executeJavaScript('snapped');
+  assert.strictEqual(highlight, null, 'highlighted empty desktop');
+
+  // A click that never becomes a drag takes the highlighted window.
+  await mouse(win3, 'mousemove', 300, 250);
+  await mouse(win3, 'mousedown', 300, 250);
+  await mouse(win3, 'mouseup', 300, 250);
+  assert.deepStrictEqual((await grabbed).rect, front);
+  win3.destroy();
+  ok('front-most wins, one click grabs it');
+
+  step('overlay drag still wins over the highlight');
+  const win4 = await overlayWithWindows(4);
+  const dragSelected = expect('overlay:select');
+  await mouse(win4, 'mousemove', 300, 250);
+  await mouse(win4, 'mousedown', 150, 100);
+  await mouse(win4, 'mousemove', 350, 260);
+  await mouse(win4, 'mouseup', 350, 260);
+  assert.deepStrictEqual((await dragSelected).rect, { x: 150, y: 100, width: 200, height: 160 });
+  win4.destroy();
+  ok();
+
+  step('overlay works with no window list at all');
+  const win5 = await open('overlay.html', 'overlay-preload.js', { width: 640, height: 460 });
+  const noList = expect('overlay:select');
+  win5.webContents.send('overlay:init', {
+    displayId: 5, mode: 'record', dataURL: '', scaleFactor: 1, bounds: {}
+  });
+  await wait(150);
+  await mouse(win5, 'mousemove', 120, 120);
+  assert.strictEqual(await win5.webContents.executeJavaScript('snapped'), null);
+  await mouse(win5, 'mousedown', 120, 120);
+  await mouse(win5, 'mousemove', 320, 260);
+  await mouse(win5, 'mouseup', 320, 260);
+  assert.deepStrictEqual((await noList).rect, { x: 120, y: 120, width: 200, height: 140 });
+  win5.destroy();
+  ok('dragging unaffected');
 }
 
 // ----------------------------------------------------------------- picker
@@ -265,6 +363,35 @@ async function testSettings() {
 
   const rows = await win.webContents.executeJavaScript('document.querySelectorAll("[data-hotkey]").length');
   assert.strictEqual(rows, 6, `expected 6 hotkey rows, got ${rows}`);
+
+  // A window that was never shown does not get real focus events, so the
+  // focusin/focusout the app listens for are dispatched directly.
+  const record = (action, init) => win.webContents.executeJavaScript(`
+    (() => {
+      const field = document.querySelector('[data-hotkey="${action}"]');
+      field.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', Object.assign(
+        { bubbles: true, cancelable: true }, ${JSON.stringify(init)}
+      )));
+      field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      return { value: state.hotkeys['${action}'], shown: field.value };
+    })()
+  `);
+
+  // Control must stay Control. CommandOrControl would silently become Command
+  // on macOS and register a shortcut the user never pressed.
+  const ctrl = await record('captureRegion', { key: 'Q', code: 'KeyQ', ctrlKey: true, shiftKey: true });
+  assert.strictEqual(ctrl.value, 'Control+Shift+Q', `recorded ${ctrl.value}`);
+  assert.strictEqual(ctrl.shown, '⌃⇧Q', `displayed ${ctrl.shown}`);
+
+  const meta = await record('captureFullscreen', { key: '$', code: 'Digit4', metaKey: true, altKey: true });
+  assert.strictEqual(meta.value, 'Command+Alt+4', `recorded ${meta.value}`);
+  assert.strictEqual(meta.shown, '⌘⌥4', `displayed ${meta.shown}`);
+
+  // A bare key would swallow that key system-wide, so it must be refused.
+  const before = settings.get().hotkeys.captureWindow;
+  const bare = await record('captureWindow', { key: 'K', code: 'KeyK' });
+  assert.strictEqual(bare.value, before, `bare key was accepted as ${bare.value}`);
 
   // Every tab must render without throwing.
   await win.webContents.executeJavaScript(`

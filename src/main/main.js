@@ -195,8 +195,13 @@ async function startRegionSelect(mode) {
   if (!(await ensureScreenAccess())) return;
 
   let shots;
+  let windowRects = [];
   try {
-    shots = await withWindowsHidden(() => capture.captureDisplays());
+    // Both run behind the same hide-our-windows pass so neither sees ScreenX.
+    [shots, windowRects] = await withWindowsHidden(() => Promise.all([
+      capture.captureDisplays(),
+      capture.listWindowBounds()
+    ]));
   } catch (err) {
     return fail(`Screen capture failed: ${err.message}`);
   }
@@ -242,7 +247,8 @@ async function startRegionSelect(mode) {
           ? ''
           : `data:image/jpeg;base64,${image.toJPEG(92).toString('base64')}`,
         scaleFactor: display.scaleFactor,
-        bounds: display.bounds
+        bounds: display.bounds,
+        windows: capture.windowsForDisplay(windowRects, display)
       });
       win.show();
       win.focus();

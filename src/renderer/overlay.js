@@ -3,6 +3,11 @@
 // Fullscreen selection overlay. The screen is already frozen into an image by
 // the main process, so everything here is drawn on one canvas: the frozen
 // screen, a dim mask, the selection rectangle, crosshair and a magnifier.
+//
+// Hovering highlights the window (or panel) under the pointer so a single click
+// grabs it, the same way dragging a rectangle grabs an arbitrary area. No
+// platform exposes foreign window rectangles to Electron, so the highlight is
+// found by looking for the borders around the pointer in the frozen image.
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -19,12 +24,15 @@ let start = null;
 let selection = null;
 let dragging = false;
 let done = false;
+let snapped = null;
+let snapEnabled = true;
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(window.innerWidth * dpr);
   canvas.height = Math.round(window.innerHeight * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  updateSnap();
   draw();
 }
 
@@ -35,6 +43,27 @@ function normalize(a, b) {
     width: Math.abs(a.x - b.x),
     height: Math.abs(a.y - b.y)
   };
+}
+
+// --------------------------------------------------------------- window hits
+
+// Windows on this display, front-most first, in this overlay's coordinates.
+let windows = [];
+let snapTitle = '';
+
+/** The front-most window containing the point. */
+function windowAt(px, py) {
+  for (const win of windows) {
+    const r = win.rect;
+    if (px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height) return win;
+  }
+  return null;
+}
+
+function updateSnap() {
+  const hit = snapEnabled && !dragging && cursor.x >= 0 ? windowAt(cursor.x, cursor.y) : null;
+  snapped = hit ? hit.rect : null;
+  snapTitle = hit ? hit.title : '';
 }
 
 function drawMagnifier(w, h) {
@@ -84,9 +113,10 @@ function drawMagnifier(w, h) {
 }
 
 function drawHint(w, h) {
-  const text = mode === 'record'
-    ? 'Drag to choose the area to record  ·  Esc or right-click to cancel'
-    : 'Drag to select an area  ·  Esc or right-click to cancel';
+  const verb = mode === 'record' ? 'record' : 'capture';
+  const text = snapped
+    ? `Click to ${verb} the highlighted window  ·  drag for a custom area  ·  Esc to cancel`
+    : `Drag to choose an area to ${verb}  ·  Esc or right-click to cancel`;
   ctx.font = '13px -apple-system, "Segoe UI", system-ui, sans-serif';
   const width = ctx.measureText(text).width + 24;
   const x = (w - width) / 2;
@@ -97,18 +127,23 @@ function drawHint(w, h) {
   ctx.fillText(text, x + 12, 39);
 }
 
-function drawSizeLabel(rect) {
-  const text = `${Math.round(rect.width)} × ${Math.round(rect.height)}`;
+function drawSizeLabel(rect, title) {
+  let text = `${Math.round(rect.width)} × ${Math.round(rect.height)}`;
+  if (title) text += `  ${title.length > 48 ? `${title.slice(0, 47)}…` : title}`;
   ctx.font = '12px ui-monospace, monospace';
-  const width = ctx.measureText(text).width + 14;
-  let x = rect.x;
-  let y = rect.y - 24;
-  if (y < 2) y = rect.y + rect.height + 4;
+  const width = Math.min(ctx.measureText(text).width + 14, Math.max(rect.width, 220));
+  const x = rect.x;
+  const y = rect.y < 26 ? rect.y + rect.height + 4 : rect.y - 24;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, width, 20);
   ctx.fillStyle = 'rgba(0,0,0,.8)';
-  ctx.fillRect(x, y, width, 20);
+  ctx.fill();
+  ctx.clip();
   ctx.fillStyle = '#fff';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, x + 7, y + 10);
+  ctx.restore();
 }
 
 function draw() {
@@ -122,9 +157,11 @@ function draw() {
   ctx.fillStyle = 'rgba(0,0,0,.45)';
   ctx.fillRect(0, 0, w, h);
 
-  const rect = selection;
-  if (rect && rect.width >= 1 && rect.height >= 1) {
-    // Punch the selection back out to full brightness.
+  const dragged = selection && selection.width >= 1 && selection.height >= 1;
+  const rect = dragged ? selection : snapped;
+
+  if (rect) {
+    // Punch the highlighted area back out to full brightness.
     ctx.save();
     ctx.beginPath();
     ctx.rect(rect.x, rect.y, rect.width, rect.height);
@@ -132,10 +169,15 @@ function draw() {
     if (screenshot) ctx.drawImage(screenshot, 0, 0, w, h);
     ctx.restore();
 
+    ctx.save();
     ctx.strokeStyle = '#3d8bfd';
     ctx.lineWidth = 1;
+    // A dashed outline marks a box that was found rather than dragged.
+    if (!dragged) ctx.setLineDash([6, 4]);
     ctx.strokeRect(rect.x + .5, rect.y + .5, rect.width - 1, rect.height - 1);
-    drawSizeLabel(rect);
+    ctx.restore();
+    drawSizeLabel(rect, dragged ? '' : snapTitle);
+    if (!dragged) drawHint(w, h);
   } else if (cursor.x >= 0) {
     ctx.strokeStyle = 'rgba(255,255,255,.55)';
     ctx.lineWidth = 1;
@@ -146,13 +188,16 @@ function draw() {
     drawHint(w, h);
   }
 
-  if (!dragging) drawMagnifier(w, h);
+  // The loupe is for picking exact pixels; a whole-window highlight is neither.
+  if (!dragging && !snapped) drawMagnifier(w, h);
 }
 
 function finish() {
   if (done) return;
-  const rect = selection;
-  if (!rect || rect.width < MIN_SIZE || rect.height < MIN_SIZE) return cancel();
+  // A click that never turned into a drag takes the highlighted box instead.
+  const dragged = selection && selection.width >= MIN_SIZE && selection.height >= MIN_SIZE;
+  const rect = dragged ? selection : snapped;
+  if (!rect) return cancel();
   done = true;
   window.screenx.select(displayId, {
     x: Math.round(rect.x),
@@ -171,6 +216,7 @@ function cancel() {
 window.screenx.onInit((payload) => {
   displayId = payload.displayId;
   mode = payload.mode;
+  windows = payload.windows || [];
   if (!payload.dataURL) return resize();
   const img = new Image();
   img.onload = () => { screenshot = img; resize(); };
@@ -189,7 +235,15 @@ window.addEventListener('mousedown', (e) => {
 
 window.addEventListener('mousemove', (e) => {
   cursor = { x: e.clientX, y: e.clientY };
-  if (dragging && start) selection = normalize(start, cursor);
+  // Holding the platform modifier turns the highlight off for this move.
+  snapEnabled = !(e.ctrlKey || e.metaKey);
+  if (dragging && start) {
+    selection = normalize(start, cursor);
+    // Once a real drag starts the highlight is out of the way.
+    if (selection.width >= MIN_SIZE || selection.height >= MIN_SIZE) snapped = null;
+  } else {
+    updateSnap();
+  }
   draw();
 });
 
@@ -206,6 +260,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') cancel();
   // Whole display without dragging.
   if (e.key === 'Enter' && !dragging) {
+    snapped = null;
     selection = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
     finish();
   }

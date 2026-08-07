@@ -12,6 +12,9 @@ const { parseName } = require('./naming');
  *  back at their native size rather than scaled down. */
 const MAX_WINDOW_THUMB = { width: 4096, height: 4096 };
 
+/** The window-list helper is a subprocess; do not let it stall a capture. */
+const WINDOW_LIST_TIMEOUT = 1500;
+
 /**
  * One entry per physical display, each with a frozen full-resolution image and
  * the capturer source id needed to open a video stream on it later.
@@ -43,6 +46,71 @@ async function captureDisplays() {
 
 function displayUnderCursor() {
   return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+}
+
+/**
+ * Visible windows with their on-screen rectangles, front-most first, in the
+ * same device-independent coordinate space Electron's screen module uses.
+ *
+ * No Electron API exposes foreign window geometry, so this shells out to the
+ * helper binaries in get-windows. Every failure mode degrades to an empty list,
+ * which turns window highlighting off and leaves dragging working.
+ */
+async function listWindowBounds() {
+  try {
+    const { openWindows } = await import('get-windows');
+    const windows = await Promise.race([
+      openWindows({ accessibilityPermission: false, screenRecordingPermission: true }),
+      new Promise((resolve) => setTimeout(() => resolve(null), WINDOW_LIST_TIMEOUT))
+    ]);
+    if (!Array.isArray(windows)) return [];
+
+    const ownProcess = app.getName();
+    return windows
+      .filter((win) => win && win.bounds && win.owner && win.owner.name !== ownProcess)
+      .filter((win) => win.bounds.width >= 40 && win.bounds.height >= 40)
+      .map((win) => ({
+        title: win.title || win.owner.name,
+        owner: win.owner.name,
+        bounds: {
+          x: Math.round(win.bounds.x),
+          y: Math.round(win.bounds.y),
+          width: Math.round(win.bounds.width),
+          height: Math.round(win.bounds.height)
+        }
+      }));
+  } catch (err) {
+    console.error('[capture] window list unavailable:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Clip the window list to one display and move it into that display's own
+ * coordinates, which is what the overlay draws in. Order is preserved because
+ * the list arrives front-most first and the overlay picks the first hit.
+ */
+function windowsForDisplay(windows, display) {
+  const { x, y, width, height } = display.bounds;
+  return windows
+    .filter((win) => {
+      const b = win.bounds;
+      return b.x < x + width && b.x + b.width > x && b.y < y + height && b.y + b.height > y;
+    })
+    .map((win) => {
+      const left = Math.max(win.bounds.x - x, 0);
+      const top = Math.max(win.bounds.y - y, 0);
+      return {
+        title: win.title,
+        rect: {
+          x: left,
+          y: top,
+          width: Math.min(win.bounds.x - x + win.bounds.width, width) - left,
+          height: Math.min(win.bounds.y - y + win.bounds.height, height) - top
+        }
+      };
+    })
+    .filter((win) => win.rect.width >= 20 && win.rect.height >= 20);
 }
 
 async function listWindows() {
@@ -147,6 +215,8 @@ module.exports = {
   captureDisplays,
   displayUnderCursor,
   listWindows,
+  listWindowBounds,
+  windowsForDisplay,
   cropToDisplayRect,
   encode,
   saveImage,

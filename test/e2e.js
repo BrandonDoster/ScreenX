@@ -62,6 +62,31 @@ async function run() {
   const windows = await capture.listWindows();
   console.log(`ok (${windows.length} window(s))`);
 
+  step('listWindowBounds');
+  const rects = await capture.listWindowBounds();
+  assert.ok(Array.isArray(rects), 'window bounds must always be an array');
+  for (const win of rects) {
+    assert.ok(typeof win.title === 'string', 'window has no title');
+    const b = win.bounds;
+    assert.ok(Number.isInteger(b.x) && Number.isInteger(b.y), `non-integer position ${JSON.stringify(b)}`);
+    assert.ok(b.width >= 40 && b.height >= 40, `undersized window ${JSON.stringify(b)}`);
+  }
+  console.log(`ok (${rects.length} with bounds)`);
+
+  step('windowsForDisplay');
+  // A window straddling the left edge of a second display gets clipped to it.
+  const fakeDisplay = { bounds: { x: 1000, y: 0, width: 800, height: 600 } };
+  const clipped = capture.windowsForDisplay([
+    { title: 'Straddling', bounds: { x: 900, y: -50, width: 400, height: 300 } },
+    { title: 'Elsewhere', bounds: { x: 0, y: 0, width: 500, height: 400 } },
+    { title: 'Contained', bounds: { x: 1100, y: 100, width: 200, height: 150 } }
+  ], fakeDisplay);
+  assert.deepStrictEqual(clipped, [
+    { title: 'Straddling', rect: { x: 0, y: 0, width: 300, height: 250 } },
+    { title: 'Contained', rect: { x: 100, y: 100, width: 200, height: 150 } }
+  ], `clipping produced ${JSON.stringify(clipped)}`);
+  ok('clipped and re-based');
+
   step(`record ${RECORD_MS}ms region`);
   const gifPath = await recordRegion(shot);
   const bytes = fs.readFileSync(gifPath);
