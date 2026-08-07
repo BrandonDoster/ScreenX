@@ -6,3 +6,7 @@ dist/
 out/
 *.log
 .DS_Store
+
+# Rust / Tauri build output
+src-tauri/target/
+src-tauri/gen/
