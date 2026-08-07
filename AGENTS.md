@@ -49,17 +49,20 @@ reference/      read-only third-party source, git-ignored, never copied from
 ## Tests
 
 ```sh
-cd src-tauri && cargo test
+npm test           # both suites
+npm run test:ui    # ui/overlay.js against a DOM stub, node --test
+npm run test:rust  # cargo test
 ```
 
-Covers filename patterns, settings round-tripping, rectangle maths, monitor
-clipping, scale-factor cropping and encoding. Run it before committing anything
-that touches those.
+The Rust suite covers filename patterns, settings round-tripping, rectangle
+maths, monitor clipping, scale-factor cropping and encoding. The UI suite loads
+the real `ui/overlay.js` in a `vm` context with a stubbed DOM (`tests/harness.mjs`)
+and asserts the selection behaviour. Values crossing back out of that realm must
+be normalised or `deepStrictEqual` rejects them on prototype identity.
 
-The webviews are not covered by automated tests; they need a real run
-(`npm run dev`) and a human at the keyboard. The riskiest parts to re-check by
-hand after a change are the overlay's dwell highlight, the editor's cut-out
-splice, and blur (which depends on the webview supporting `ctx.filter`).
+The editor and settings webviews have no automated coverage — WKWebView has no
+WebDriver support on macOS. After changing them, re-check by hand: the editor's
+cut-out splice, and blur, which depends on the webview supporting `ctx.filter`.
 
 ## Platform notes
 

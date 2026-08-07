@@ -149,12 +149,19 @@ it is safe.
 ## Tests
 
 ```sh
-cd src-tauri && cargo test
+npm test           # both suites
+npm run test:ui    # overlay selection behaviour, node --test
+npm run test:rust  # cargo test
 ```
 
-Covers filename patterns, settings round-tripping, rectangle maths, monitor
-clipping, scale-factor cropping and image encoding. The webviews are not covered
-automatically and need a real run.
+The Rust suite covers filename patterns, settings round-tripping, rectangle
+maths, monitor clipping, scale-factor cropping and image encoding. The UI suite
+runs the real `ui/overlay.js` against a DOM stub and asserts the selection
+behaviour: dwell timing, front-most-window hit-testing, drag beating a
+highlight, and that exactly one outcome is ever reported.
+
+The editor and settings webviews still need a real run; WKWebView has no
+WebDriver support on macOS, so there is no headless path for those.
 
 ## Licence
 
