@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ScreenX Settings</title>
+  <link rel="stylesheet" href="app.css">
+  <style>
+    body { display: flex; flex-direction: column; }
+    nav { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--border); }
+    nav button { border: 1px solid transparent; border-bottom: none; border-radius: var(--radius) var(--radius) 0 0;
+                 background: transparent; color: var(--text-dim); padding: 8px 14px; }
+    nav button.active { background: var(--bg-raised); border-color: var(--border); color: var(--text); }
+    main { flex: 1; overflow: auto; padding: 20px 24px 8px; }
+    footer { display: flex; gap: 8px; align-items: center; padding: 12px 24px; border-top: 1px solid var(--border); }
+    section { display: none; max-width: 720px; }
+    section.active { display: block; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim);
+         margin: 22px 0 10px; }
+    h2:first-child { margin-top: 0; }
+    .field { margin-bottom: 14px; }
+    .field > label { display: block; margin-bottom: 5px; }
+    .check { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; color: var(--text); }
+    .check input { width: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 5px 0; vertical-align: middle; }
+    td.name { width: 46%; }
+    td.clear { width: 34px; text-align: right; }
+    .hotkey { text-align: center; cursor: pointer; }
+    .hotkey.listening { border-color: var(--accent); color: var(--accent); }
+    .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 2px 14px;
+              font-size: 12px; color: var(--text-dim); }
+    .tokens code { color: var(--text); }
+    #status { flex: 1; color: var(--text-dim); font-size: 12px; }
+    .warn { color: #f0a020; }
+  </style>
+</head>
+<body>
+  <nav>
+    <button data-tab="general" class="active">General</button>
+    <button data-tab="naming">Naming</button>
+    <button data-tab="recording">Recording</button>
+    <button data-tab="hotkeys">Hotkeys</button>
+  </nav>
+
+  <main>
+    <section id="general" class="active">
+      <h2>Storage</h2>
+      <div class="field">
+        <label for="screenshotFolder">Screenshot folder</label>
+        <div class="row">
+          <input type="text" id="screenshotFolder" class="grow">
+          <button data-browse="screenshotFolder">Browse</button>
+          <button data-open="screenshotFolder">Open</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="gifFolder">GIF folder</label>
+        <div class="row">
+          <input type="text" id="gifFolder" class="grow">
+          <button data-browse="gifFolder">Browse</button>
+          <button data-open="gifFolder">Open</button>
+        </div>
+      </div>
+
+      <h2>After capture</h2>
+      <div class="field">
+        <label for="afterCapture">What happens once a screenshot is taken</label>
+        <select id="afterCapture">
+          <option value="editor">Open in editor</option>
+          <option value="save">Save to disk</option>
+          <option value="copy">Copy to clipboard only</option>
+          <option value="saveCopy">Save to disk and copy to clipboard</option>
+        </select>
+      </div>
+      <div class="field row">
+        <div class="grow">
+          <label for="imageFormat">Image format</label>
+          <select id="imageFormat">
+            <option value="png">PNG</option>
+            <option value="jpg">JPEG</option>
+          </select>
+        </div>
+        <div class="grow">
+          <label for="jpegQuality">JPEG quality</label>
+          <input type="number" id="jpegQuality" min="10" max="100" step="1">
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="copyPathAfterSave"> Copy file path to clipboard after saving</label>
+      <label class="check"><input type="checkbox" id="showNotification"> Show a notification after each capture</label>
+      <label class="check"><input type="checkbox" id="launchAtLogin"> Start ScreenX when I log in</label>
+
+      <h2>Features</h2>
+      <p class="hint">Disabled features vanish from the tray menu and give up their hotkey.</p>
+      <label class="check"><input type="checkbox" data-feature="captureFullscreen"> Capture entire screen</label>
+      <label class="check"><input type="checkbox" data-feature="captureRegion"> Capture region</label>
+      <label class="check"><input type="checkbox" data-feature="captureWindow"> Capture window</label>
+      <label class="check"><input type="checkbox" data-feature="recordRegion"> Record region as GIF</label>
+      <label class="check"><input type="checkbox" data-feature="recordWindow"> Record window as GIF</label>
+      <label class="check"><input type="checkbox" data-feature="editor"> Image editor</label>
+    </section>
+
+    <section id="naming">
+      <h2>Auto-save file names</h2>
+      <div class="field">
+        <label for="screenshotNamePattern">Screenshot pattern</label>
+        <input type="text" id="screenshotNamePattern" class="mono">
+        <div class="hint" id="screenshotPreview"></div>
+      </div>
+      <div class="field">
+        <label for="gifNamePattern">GIF pattern</label>
+        <input type="text" id="gifNamePattern" class="mono">
+        <div class="hint" id="gifPreview"></div>
+      </div>
+      <div class="field">
+        <label for="autoIncrementNumber">Current auto-increment value (<code>%i</code>)</label>
+        <input type="number" id="autoIncrementNumber" min="0" step="1" style="max-width:160px">
+      </div>
+
+      <h2>Tokens</h2>
+      <div class="tokens" id="tokens"></div>
+      <p class="hint">A number in braces sets the width: <code>%i{4}</code> gives 0007, <code>%ra{6}</code> gives six random characters.</p>
+    </section>
+
+    <section id="recording">
+      <h2>GIF recording</h2>
+      <div class="field row">
+        <div class="grow">
+          <label for="gifFps">Frames per second</label>
+          <input type="number" id="gifFps" min="1" max="30" step="1">
+        </div>
+        <div class="grow">
+          <label for="gifMaxSeconds">Stop automatically after (seconds)</label>
+          <input type="number" id="gifMaxSeconds" min="1" max="600" step="1">
+        </div>
+      </div>
+      <div class="field row">
+        <div class="grow">
+          <label for="gifMaxWidth">Scale down to width (0 keeps the original)</label>
+          <input type="number" id="gifMaxWidth" min="0" max="3840" step="10">
+        </div>
+        <div class="grow">
+          <label for="gifRepeat">Looping</label>
+          <select id="gifRepeat">
+            <option value="0">Loop forever</option>
+            <option value="-1">Play once</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">Higher frame rates and larger areas make much bigger files and need more CPU while
+        recording. 15 fps at 800 px wide is a good starting point.</p>
+    </section>
+
+    <section id="hotkeys">
+      <h2>Global hotkeys</h2>
+      <p class="hint">Click a field and press the combination. Backspace clears it.</p>
+      <table id="hotkeyTable"></table>
+      <p class="hint" id="hotkeyWarning"></p>
+    </section>
+  </main>
+
+  <footer>
+    <div id="status"></div>
+    <button id="reset">Restore defaults</button>
+    <button id="close">Close</button>
+    <button id="save" class="primary">Save</button>
+  </footer>
+
+  <script src="settings.js"></script>
+</body>
+</html>
