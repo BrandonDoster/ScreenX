@@ -186,6 +186,16 @@ JSON round-trip them) or `deepStrictEqual` rejects them on prototype identity.
 
 ---
 
+## Documentation
+
+Changing `README.md`, `docs/TECHNICAL.md` or `AGENTS.md`, or regenerating the
+screenshots? Read `.agents/skills/screenx-docs/SKILL.md` first. It covers which
+register each document uses, the ASD-STE100 rules the README follows, how
+`npm run docshots` produces the screenshots from a drawn mock window, and the
+two privacy rules that keep real desktops and user names out of the repository.
+
+---
+
 ## Style
 
 Match the surrounding code. Comments explain *why*, not *what* — most existing
