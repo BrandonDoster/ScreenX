@@ -1,178 +1,405 @@
 # ScreenX
 
-A screen capture and annotation tool for macOS (Intel) and Windows. Everything
-stays on your machine — no uploading, no account, no network code.
+Take a screenshot. Mark it up. Save it.
 
-Built with Tauri: a Rust core does the capture, encoding and file handling, and
-three small webviews provide the selection overlay, the editor and the settings
-form.
+ScreenX is a screen capture tool for macOS and Windows. It keeps everything on
+your computer. It does not upload your screenshots, it does not need an account,
+and it contains no network code.
 
-## Features
+The application is 6.9 MB.
 
-- **Capture the entire screen** — whichever display the pointer is on.
-- **Capture a region or a window, from one tool.** Drag a rectangle for an
-  arbitrary area, or rest the pointer on a window for a moment and it lights up
-  so a single click captures exactly that window.
-- **Annotation editor** — rectangles, ellipses, arrows, lines, freehand,
-  highlighter, blur, pixelate, text, numbered steps, crop, and cut-out (remove a
-  full-width or full-height band and close the gap), with undo and redo.
-- **Settings** for the storage folder, filename patterns, global hotkeys, image
-  format and the highlight delay — all in one JSON file you can also edit by hand.
+---
 
-GIF recording is not in this version. It was in the earlier Electron build and is
-parked until the screenshot side is finished.
+## Contents
 
-## Why it was rewritten
+- [Install](#install)
+- [First run](#first-run)
+- [Take a screenshot](#take-a-screenshot)
+- [Mark up a screenshot](#mark-up-a-screenshot)
+- [Settings](#settings)
+- [Name your files](#name-your-files)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [If something does not work](#if-something-does-not-work)
+- [For developers](#for-developers)
 
-Version 0.1 was Electron. Measured on the same Intel Mac, against the same
-3584×2240 Retina display:
+---
 
-| | 0.1 (Electron) | 0.2 (Rust + Tauri) |
-| --- | --- | --- |
-| macOS app bundle | 281 MB | **6.9 MB** |
-| Installer | — | **3.0 MB** (dmg) |
-| Full-screen capture | ~600 ms | **114–236 ms** |
-| PNG encode | — | **35 ms** |
-| Window list with bounds | 518 ms (helper subprocess) | **0.6 ms** |
+## Install
 
-The window list is the one that changed the feel of the product: at 0.6 ms the
-region overlay can hit-test the pointer against real window rectangles on every
-mouse move, which is what makes hover-to-highlight work.
+### macOS
 
-## Building and running
+1. Open `ScreenX_0.2.0_x64.dmg`.
+2. Move ScreenX into your Applications folder.
+3. Start ScreenX.
 
-Needs [Rust](https://rustup.rs) and Node (for the Tauri CLI only).
+The application is not signed yet. macOS shows a warning the first time. To
+start it:
 
-```sh
-npm install
-npm run dev      # run it
-npm run build    # produce an installer
-```
+1. Open your Applications folder.
+2. Hold the Control key and click ScreenX.
+3. Click **Open**.
+4. Click **Open** again in the warning.
 
-On Windows the build has to be run on Windows; there is no cross-compilation path
-from macOS for the MSVC target.
+You do this one time only.
 
-## Default hotkeys
+### Windows
 
-| Action | Shortcut |
+1. Run the installer.
+2. Start ScreenX.
+
+---
+
+## First run
+
+ScreenX puts an icon in the menu bar (macOS) or the notification area
+(Windows). It has no main window. You use it from that icon or with a keyboard
+shortcut.
+
+> **PLACEHOLDER — screenshot: `docs/images/tray-menu.png`**
+> The menu bar icon with its menu open. The menu shows "Capture Entire Screen",
+> "Capture Region or Window", "Open Screenshots Folder", "Settings..." and
+> "Quit ScreenX".
+
+The settings window opens the first time you start ScreenX. Look at the
+screenshot folder. Change it if you want to. Then click **Save**.
+
+### macOS asks for permission
+
+macOS must give ScreenX permission to read the screen. If your screenshots are
+blank:
+
+1. Open **System Settings**.
+2. Go to **Privacy & Security** > **Screen Recording**.
+3. Turn on **ScreenX**.
+4. Start ScreenX again.
+
+---
+
+## Take a screenshot
+
+### The whole screen
+
+Press **Ctrl + Alt + F**. ScreenX captures the screen that your pointer is on.
+
+### A part of the screen, or one window
+
+Press **Ctrl + Alt + A**. The screen freezes and becomes dark. Now you have two
+choices.
+
+**To capture any rectangle:** hold the mouse button down, drag, then let go.
+
+**To capture one window:** move the pointer over the window. Wait for a short
+moment. The window becomes bright and a dashed line appears around it. Its name
+appears in a small label. Click one time.
+
+> **PLACEHOLDER — screenshot: `docs/images/overlay.png`**
+> The selection overlay with a window highlighted: the screen dark, one window
+> bright inside a dashed blue outline, and the size and title label above it.
+>
+> I did not make this screenshot, because it must show a real desktop. Take it
+> yourself when your screen shows nothing private.
+
+You do not have to choose a mode. Drag for a rectangle, or wait and click for a
+window. The same tool does both.
+
+While the overlay is open:
+
+| To do this | Do this |
 | --- | --- |
-| Capture entire screen | `Ctrl + Alt + F` |
-| Capture region or window | `Ctrl + Alt + A` |
+| Stop the window highlight | Hold Ctrl or Cmd while you move the pointer |
+| Capture the whole screen | Press Enter |
+| Cancel | Press Esc, or click the right mouse button |
 
-Change them under Settings → Hotkeys. Modifiers are recorded exactly as pressed:
-if you press Control, Control is what gets registered, on every platform.
-Combinations another application already owns are reported after saving.
+**Esc always cancels.** The overlay covers the menu bar, so you cannot reach the
+menu bar icon while the overlay is open. ScreenX takes the Esc key for as long
+as the overlay is on the screen, and gives it back immediately after.
 
-**Escape always cancels a selection.** While the overlay is up it covers the menu
-bar, so Escape is claimed globally for exactly as long as the overlay is on
-screen, and released the moment it closes.
+macOS shows only the windows that you can see. ScreenX cannot highlight a window
+that is behind another window, or that is minimised. Bring the window to the
+front first.
 
-## Using the region tool
+---
 
-- **Drag** anywhere for a custom rectangle.
-- **Rest the pointer on a window** for the highlight delay (400 ms by default,
-  configurable, 0 for instant) and that window lights up with its title. One
-  click captures it.
-- **Hold Ctrl or Cmd** while moving to suppress highlighting entirely.
-- **Enter** takes the whole display, **Escape** or right-click cancels.
+## Mark up a screenshot
 
-## Editor
+The editor opens after each capture. You can change this in the settings.
 
-| Key | Action |
+![The ScreenX editor. It shows a blur, a red box, an orange arrow, a yellow highlight, a step number and a text label on an example window](docs/images/editor.png)
+
+### The tools
+
+| Tool | What it does |
 | --- | --- |
-| `1`–`9` | switch to the first nine tools |
-| `Ctrl/Cmd + Z` / `+ Shift + Z` | undo / redo |
-| `Ctrl/Cmd + C` | copy image to clipboard |
-| `Ctrl/Cmd + S` / `+ Shift + S` | save / save as… |
-| `Delete` | delete the selected annotation |
-| `Esc` | close |
+| **Select** | Move an item that you drew. Press Delete to remove it. |
+| **Rectangle** | Draw a box. |
+| **Ellipse** | Draw a circle or an oval. |
+| **Arrow** | Draw an arrow. |
+| **Line** | Draw a straight line. |
+| **Freehand** | Draw a free line with the mouse. |
+| **Highlighter** | Put a transparent colour over an area. |
+| **Blur** | Hide an area. The pixels are destroyed. |
+| **Pixelate** | Hide an area with large squares. |
+| **Text** | Type words on the image. |
+| **Step number** | Put a numbered circle on the image. Each click adds the next number. |
+| **Crop** | Keep only the area that you drag. |
+| **Cut out** | Remove a band, and join the two parts. |
 
-Hold `Shift` while dragging a rectangle or ellipse to keep it square.
+### Blur hides information permanently
 
-**Cut out** removes a band and butts the remaining pieces together. Drag wider
-than tall to take out a full-height column; drag taller than wide to take out a
-full-width row. The band to be removed is shown in red while you drag.
+Use **Blur** or **Pixelate** to hide a password, a name or an address. Both
+tools destroy the pixels. Nobody can get the original back from the saved file.
 
-## Filename patterns
+### How to cut out a band
 
-`ScreenX_%y-%mo-%d_%h-%mi-%s` produces `ScreenX_2026-08-07_14-32-05.png`.
+**Cut out** removes a band from the image and joins the two parts together. Use
+it to remove empty space from the middle of a long screenshot.
 
-| Token | Meaning |
+1. Select the **Cut out** tool.
+2. Drag across the part that you want to remove.
+3. Let go.
+
+The shape of your drag sets the direction of the cut:
+
+- Drag **wider than tall**. ScreenX removes a **full-height column**.
+- Drag **taller than wide**. ScreenX removes a **full-width row**.
+
+ScreenX shows the band in red while you drag. Press Ctrl+Z to undo.
+
+### Colour and size
+
+The second row of the toolbar sets the colour, the fill, the line width and the
+text size. To change an item that you already drew, select it first.
+
+### Save your work
+
+| Button | What it does |
 | --- | --- |
-| `%y` `%yy` | year (2026 / 26) |
-| `%mo` `%mon` `%mon2` | month (08 / Aug / August) |
-| `%d` | day of month |
-| `%w` `%w2` | weekday (Fri / Friday) |
-| `%wy` | ISO week number |
-| `%h` `%h12` `%pm` | hour, 12-hour hour, AM/PM |
-| `%mi` `%s` `%ms` | minute, second, millisecond |
-| `%unix` | Unix timestamp |
-| `%i` | auto-increment counter |
-| `%ra` `%rn` `%rx` | random letters / digits / hex |
-| `%guid` | random GUID |
-| `%t` | window or screen title |
-| `%width` `%height` | image size |
-| `%un` `%cn` | user name / computer name |
-| `%pn` | application name |
+| **Save** | Write the file to your screenshot folder, and close the editor. |
+| **Save As...** | Choose the name and the folder yourself. |
+| **Copy** | Put the image on the clipboard. |
 
-`%i{4}` gives `0007`, `%ra{6}` gives six random characters. Unknown tokens are
-left in the name so typos are visible. Characters no filesystem accepts are
-stripped, and an existing file is never overwritten — ` (2)`, ` (3)` and so on
-are appended instead.
+---
 
-## Settings file
+## Settings
 
-Everything lives in one JSON file, shown and openable from Settings → General:
+Open the settings from the menu bar icon.
+
+![The General tab of the ScreenX settings window](docs/images/settings.png)
+
+### General
+
+| Setting | What it does |
+| --- | --- |
+| **Screenshot folder** | Where ScreenX writes your files. |
+| **What happens once a screenshot is taken** | Open the editor, save the file, copy the image, or save and copy. |
+| **Image format** | PNG or JPEG. PNG keeps all detail. JPEG makes smaller files. |
+| **JPEG quality** | 10 to 100. A higher number gives better quality and a larger file. |
+| **Copy the file path** | Put the path of the new file on the clipboard. |
+| **Features** | Turn off a feature that you do not use. It leaves the menu and gives up its shortcut. |
+
+### Capture
+
+**Rest this long before a window highlights** sets the wait time in
+milliseconds. The default is 400.
+
+- Use a smaller number for a faster highlight.
+- Use 0 to highlight as soon as the pointer moves over a window.
+- Use a larger number if the highlight appears when you do not want it.
+
+### Hotkeys
+
+![The Hotkeys tab of the ScreenX settings window](docs/images/settings-hotkeys.png)
+
+To change a shortcut:
+
+1. Click the field.
+2. Press the keys.
+
+To remove a shortcut, click the field and press Backspace.
+
+ScreenX records the keys exactly as you press them. If you press Control, you
+get Control. ScreenX does not change Control into Command.
+
+A shortcut works in every application, so choose a combination that no other
+application uses. If another application already owns your combination, ScreenX
+tells you after you save.
+
+### The settings file
+
+All settings are in one file. You can edit it in a text editor.
 
 - macOS: `~/Library/Application Support/ScreenX/settings.json`
 - Windows: `%APPDATA%\ScreenX\settings.json`
 
-Missing keys fall back to defaults and unknown keys are ignored, so hand-editing
-it is safe.
+The **General** tab shows the path. Click the path to open the file.
 
-## Platform notes
+ScreenX ignores a setting that it does not know, and uses the default for a
+setting that is absent. You cannot stop the application from starting when you
+edit this file.
 
-### macOS
+---
 
-- Grant **Screen Recording** permission under System Settings → Privacy &
-  Security. Without it captures come back blank.
-- macOS only reports windows that are actually visible. A minimised or fully
-  covered window cannot be highlighted — bring it to the front first.
-- Builds target Intel (x64) and run on Apple Silicon under Rosetta.
+## Name your files
 
-### Windows
+ScreenX builds each file name from a pattern. The default pattern is:
 
-- No extra permissions are needed.
-- Hardware-accelerated fullscreen games may capture as a black frame; run them in
-  borderless-window mode instead.
-
-## Tests
-
-```sh
-npm test           # both suites
-npm run test:ui    # overlay selection behaviour, node --test
-npm run test:rust  # cargo test
+```
+ScreenX_%y-%mo-%d_%h-%mi-%s
 ```
 
-The Rust suite covers filename patterns, settings round-tripping, rectangle
-maths, monitor clipping, scale-factor cropping and image encoding. The UI suite
-runs the real `ui/overlay.js` against a DOM stub and asserts the selection
-behaviour: dwell timing, front-most-window hit-testing, drag beating a
-highlight, and that exactly one outcome is ever reported.
+It gives a name such as `ScreenX_2026-08-07_14-32-05.png`.
+
+Each part that starts with `%` is a token. ScreenX replaces each token with a
+value.
+
+| Token | Value | Example |
+| --- | --- | --- |
+| `%y` | Year, 4 digits | 2026 |
+| `%yy` | Year, 2 digits | 26 |
+| `%mo` | Month, 2 digits | 08 |
+| `%mon` | Month, short name | Aug |
+| `%mon2` | Month, full name | August |
+| `%d` | Day of the month | 07 |
+| `%w` | Day of the week, short | Fri |
+| `%w2` | Day of the week, full | Friday |
+| `%wy` | Week number | 32 |
+| `%h` | Hour, 24-hour clock | 14 |
+| `%h12` | Hour, 12-hour clock | 02 |
+| `%pm` | AM or PM | PM |
+| `%mi` | Minute | 32 |
+| `%s` | Second | 05 |
+| `%ms` | Millisecond | 042 |
+| `%unix` | Seconds since 1 January 1970 | 1786012325 |
+| `%i` | A number that counts up | 7 |
+| `%ra` | Random letters and digits | k3Bq7zR1pW |
+| `%rn` | Random digits | 5820394617 |
+| `%rx` | Random hexadecimal digits | 9f3c1a08bd |
+| `%guid` | A random unique code | 5f2b8c14-… |
+| `%t` | Name of the window or the screen | Example Window |
+| `%width` | Width of the image | 1920 |
+| `%height` | Height of the image | 1080 |
+| `%un` | Your user name | you |
+| `%cn` | Name of your computer | laptop |
+| `%pn` | Name of this application | ScreenX |
+
+### Set the width of a token
+
+Put a number in braces after the token.
+
+- `%i{4}` gives `0007`.
+- `%ra{6}` gives 6 random characters.
+
+### Rules
+
+- ScreenX removes each character that a file name cannot contain.
+- ScreenX never writes over a file. It adds ` (2)`, ` (3)` and so on.
+- If you make a mistake in a token, the token stays in the name. This shows you
+  the mistake.
+
+The **Naming** tab shows an example of your pattern while you type it.
+
+---
+
+## Keyboard shortcuts
+
+### Anywhere
+
+| Keys | Action |
+| --- | --- |
+| Ctrl + Alt + F | Capture the whole screen |
+| Ctrl + Alt + A | Capture a region or a window |
+
+These are the defaults. Change them in the settings.
+
+### In the selection overlay
+
+| Keys | Action |
+| --- | --- |
+| Esc | Cancel |
+| Enter | Capture the whole screen |
+| Ctrl or Cmd (hold) | Stop the window highlight |
+
+### In the editor
+
+| Keys | Action |
+| --- | --- |
+| 1 to 9 | Select one of the first nine tools |
+| Ctrl/Cmd + Z | Undo |
+| Ctrl/Cmd + Shift + Z | Redo |
+| Ctrl/Cmd + C | Copy the image |
+| Ctrl/Cmd + S | Save |
+| Ctrl/Cmd + Shift + S | Save As |
+| Delete | Remove the selected item |
+| Esc | Close the editor |
+| Shift (hold while you drag) | Keep a rectangle square, or an ellipse circular |
+
+---
+
+## If something does not work
+
+### My screenshots are blank or black
+
+**macOS:** give ScreenX permission to read the screen. See
+[macOS asks for permission](#macos-asks-for-permission).
+
+**Windows:** a game in full-screen mode can capture as black. Set the game to
+borderless-window mode.
+
+### A window does not highlight
+
+macOS reports only the windows that you can see. Bring the window to the front,
+then try again.
+
+Also make sure that the window is larger than 48 by 48 pixels. ScreenX ignores
+smaller windows, because they are usually menu bar items and shadows.
+
+### My shortcut does nothing
+
+Another application has taken the same combination. Open the settings, go to
+**Hotkeys**, and choose a different combination. If the system refuses a
+combination, ScreenX tells you after you save.
+
+### The overlay is on the screen and I cannot remove it
+
+Press **Esc**. ScreenX holds the Esc key for as long as the overlay is open.
+
+### The editor is slow with a very large image
+
+Click the **Fit** button to change the zoom. This does not change the saved
+image.
+
+---
+
+## For developers
+
+- [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — how ScreenX works inside: the
+  architecture, the data flow, the coordinate systems, and how to build it.
+- [`AGENTS.md`](AGENTS.md) — a map of the code for AI coding assistants.
+
+Quick start:
 
 ```sh
-npm run selfcheck  # checks the real webview and window server
+npm install
+npm run dev        # run it
+npm test           # run the tests
+npm run selfcheck  # check the real webview and window server
+npm run build      # make an installer
 ```
 
-The self-check answers what neither suite can, by exercising the real webview,
-window server and screen: that a capture crops, names and writes a file that
-reads back at the right size; that the `screenx:` URI scheme loads an image in a
-webview; that the overlay window really lands above the menu bar; and that the
-blur tool genuinely blurs. It found that WKWebView does not implement
-`ctx.filter`, which is why blur is done by hand in `ui/blur.js`.
+---
 
-The editor and settings webviews still need a real run for anything beyond that;
-WKWebView has no WebDriver support on macOS.
+## What is not here yet
+
+**GIF recording.** An earlier version had it. It is paused until the screenshot
+side is complete.
+
+**A signed application.** Both builds are unsigned. macOS and Windows both warn
+you the first time you start ScreenX.
+
+**A tested Windows build.** The Windows code is written, but nobody has run it
+yet. Build it on Windows and report what breaks.
+
+---
 
 ## Licence
 
