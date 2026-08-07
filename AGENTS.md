@@ -60,9 +60,17 @@ the real `ui/overlay.js` in a `vm` context with a stubbed DOM (`tests/harness.mj
 and asserts the selection behaviour. Values crossing back out of that realm must
 be normalised or `deepStrictEqual` rejects them on prototype identity.
 
-The editor and settings webviews have no automated coverage — WKWebView has no
-WebDriver support on macOS. After changing them, re-check by hand: the editor's
-cut-out splice, and blur, which depends on the webview supporting `ctx.filter`.
+`npm run selfcheck` runs a debug-only diagnostic inside the real webview and
+window server: the `screenx:` URI scheme, the overlay's window level, and that
+blur actually blurs. Run it after touching `ui/blur.js`, the URI scheme handler
+or `raise_above_menu_bar`.
+
+**WKWebView does not implement `ctx.filter`.** Blur is done by hand in
+`ui/blur.js` with progressive halving; do not "simplify" it back to a canvas
+filter. It is a redaction tool, so it has to destroy pixels, not soften them.
+
+The editor and settings webviews have no other automated coverage — WKWebView
+has no WebDriver support on macOS.
 
 ## Platform notes
 

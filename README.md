@@ -160,8 +160,18 @@ runs the real `ui/overlay.js` against a DOM stub and asserts the selection
 behaviour: dwell timing, front-most-window hit-testing, drag beating a
 highlight, and that exactly one outcome is ever reported.
 
-The editor and settings webviews still need a real run; WKWebView has no
-WebDriver support on macOS, so there is no headless path for those.
+```sh
+npm run selfcheck  # checks the real webview and window server
+```
+
+The self-check answers what neither suite can, by running inside the actual
+engine: that the `screenx:` URI scheme loads an image in a webview, that the
+overlay window really lands above the menu bar, and that the blur tool genuinely
+blurs. It found that WKWebView does not implement `ctx.filter`, which is why
+blur is done by hand in `ui/blur.js`.
+
+The editor and settings webviews still need a real run for anything beyond that;
+WKWebView has no WebDriver support on macOS.
 
 ## Licence
 
