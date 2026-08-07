@@ -37,6 +37,9 @@ reference/      read-only third-party source, git-ignored, never copied from
   in device-independent pixels; captured images are in physical pixels.
   `capture::crop_to_rect` is the only place the scale factor is applied. Mixing
   them up silently produces off-by-scale-factor crops on Retina displays.
+- **xcap is not consistent across platforms.** It reports macOS geometry in
+  points and Windows geometry in physical pixels. `capture::to_dip` normalises
+  it once, at the boundary; nothing downstream should touch a scale factor.
 - **Hotkeys are stored literally.** `Control` means Control, on every platform.
   Do not reintroduce a per-platform modifier: it registers a shortcut the user
   never pressed. `global-hotkey`'s parser already accepts the literal form.

@@ -164,11 +164,12 @@ highlight, and that exactly one outcome is ever reported.
 npm run selfcheck  # checks the real webview and window server
 ```
 
-The self-check answers what neither suite can, by running inside the actual
-engine: that the `screenx:` URI scheme loads an image in a webview, that the
-overlay window really lands above the menu bar, and that the blur tool genuinely
-blurs. It found that WKWebView does not implement `ctx.filter`, which is why
-blur is done by hand in `ui/blur.js`.
+The self-check answers what neither suite can, by exercising the real webview,
+window server and screen: that a capture crops, names and writes a file that
+reads back at the right size; that the `screenx:` URI scheme loads an image in a
+webview; that the overlay window really lands above the menu bar; and that the
+blur tool genuinely blurs. It found that WKWebView does not implement
+`ctx.filter`, which is why blur is done by hand in `ui/blur.js`.
 
 The editor and settings webviews still need a real run for anything beyond that;
 WKWebView has no WebDriver support on macOS.
