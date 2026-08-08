@@ -17,6 +17,9 @@ eframe = { version = "0.29", default-features = false, features = [
     "default_fonts",
 ] }
 egui = "0.29"
+# Both are the crates Tauri's own plugins wrap, minus the plugin layer.
+tray-icon = "0.19"
+global-hotkey = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
