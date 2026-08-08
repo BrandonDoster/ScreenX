@@ -1,0 +1,8 @@
+# Authored on macOS and built on Windows. Normalise to LF in the repository and
+# check out LF everywhere, so a Windows build does not rewrite every file it
+# touches and leave the tree dirty with line-ending-only changes.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary

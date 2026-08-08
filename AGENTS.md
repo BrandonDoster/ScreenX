@@ -19,7 +19,7 @@ selection overlay, the annotation editor and the settings form. Fully offline �
 - Rust entry point: `src-tauri/src/lib.rs` → `run()` at the bottom.
 - Pages: `ui/*.html` + matching `.js`. No framework, no bundler, no build step.
 - One JSON settings file. GIF recording is deliberately absent (parked).
-- 6.9 MB bundle. 23 Rust tests, 28 JS tests, 6 self-checks. All must stay green.
+- 6.9 MB bundle. 23 Rust tests, 28 JS tests, 7 self-checks. All must stay green.
 
 ---
 
@@ -27,12 +27,12 @@ selection overlay, the annotation editor and the settings form. Fully offline �
 
 | File | Lines | Holds |
 | --- | ---: | --- |
-| `src-tauri/src/lib.rs` | 833 | State, tray, hotkeys, capture flows, window builders, all commands |
+| `src-tauri/src/lib.rs` | 860 | State, tray, hotkeys, capture flows, window builders, all commands |
 | `src-tauri/src/capture.rs` | 408 | xcap wrappers, `Rect` maths, coordinate normalisation, encoding, saving |
 | `src-tauri/src/naming.rs` | 329 | Filename pattern expansion + its tests |
 | `src-tauri/src/settings.rs` | 201 | The single JSON settings file |
-| `src-tauri/src/selfcheck.rs` | 179 | Debug only. Diagnostics needing a real webview/screen |
-| `src-tauri/src/docshots.rs` | ~200 | Debug only. Generates `docs/images/*` |
+| `src-tauri/src/selfcheck.rs` | 199 | Debug only. Diagnostics needing a real webview/screen |
+| `src-tauri/src/docshots.rs` | 212 | Debug only. Generates `docs/images/*` |
 | `ui/editor.js` | 752 | Annotation editor |
 | `ui/overlay.js` | 347 | Selection overlay, one instance per monitor |
 | `ui/settings.js` | 307 | Settings form, hotkey recorder |
@@ -48,15 +48,15 @@ compile it, never copy from it, never commit it.** It is gitignored.
 
 | Task | Go to |
 | --- | --- |
-| Add a command the UI can call | `lib.rs` — write `#[tauri::command]`, then add it to `invoke_handler!` (line 776) |
+| Add a command the UI can call | `lib.rs` — write `#[tauri::command]`, then add it to `invoke_handler!` (line 795). If it opens or closes a window, read invariant 11 first |
 | Add a setting | `settings.rs` `Settings` struct + its `Default`, then a control in `ui/settings.html`, then `fill()` and `collect()` in `ui/settings.js` |
 | Add a filename token | `naming.rs` — `TOKENS` array (line 27, **longest first**) and `expand()` (line 101), then the README table |
 | Add an editor tool | `ui/editor.js` — `TOOLS` array (line 18), a `case` in `drawShape()`, and `shapeBounds()` if the shape is not `x1,y1,x2,y2` |
-| Change how a window is opened | `lib.rs` — `open_settings` (105), `open_editor` (126), overlays inside `start_region_select` (280) |
+| Change how a window is opened | `lib.rs` — `open_settings` (105), `open_editor` (126), overlays inside `start_region_select` (283) |
 | Change what happens after a capture | `lib.rs` — `deliver()` (196) |
 | Change region/window selection behaviour | `ui/overlay.js` — dwell logic near the top, `finish()` for the outcome |
-| Change the tray menu | `lib.rs` — `build_tray()` (486) |
-| Change hotkey recording | `ui/settings.js` — `toAccelerator()`; registration in `lib.rs` `register_hotkeys()` (453) |
+| Change the tray menu | `lib.rs` — `build_tray()` (489) |
+| Change hotkey recording | `ui/settings.js` — `toAccelerator()`; registration in `lib.rs` `register_hotkeys()` (456) |
 | Touch coordinates | `capture.rs` — `to_dip()` (83) and `crop_to_rect()` (198). Read invariant 1 first |
 
 ---
@@ -97,8 +97,9 @@ As and Copy. It looks exactly like an OS permission problem and is not.
 remove the frame keyed to that window. Otherwise every capture leaks megabytes
 for the process lifetime.
 
-**7. Window creation belongs on the main thread.** Commands run on worker
-threads; use `on_main()` (lib.rs 226). Capture itself can run anywhere.
+**7. Window creation belongs on the main thread.** Use `on_main()` (lib.rs 229).
+Capture itself can run anywhere. Note that `on_main` only defers when the caller
+is not already the main thread, so it does not stand alone — see invariant 11.
 
 **8. Esc is claimed globally while an overlay is open** and released when it
 closes. The overlay covers the menu bar, so the tray cannot rescue a stuck
@@ -111,6 +112,19 @@ save, which is deliberate.
 **10. No frontend build step.** `ui/` files load as-is. Plain browser JS only —
 no `import`, no `require`, no npm packages. Add a `<script>` tag for new files,
 and mirror the load order in the test harness.
+
+**11. A command that opens or closes a window must be
+`#[tauri::command(async)]`.** A plain `#[tauri::command]` runs inline on the
+thread that received the IPC message, which on Windows is inside WebView2's
+`WebMessageReceived` callback. Closing the overlay from there destroys the
+webview that is dispatching the message, and building the editor runs a nested
+Win32 message pump inside a WebView2 callback. WebView2 forbids both and
+deadlocks: the process goes Not Responding with nothing on stdout. WKWebView
+tolerates both, so macOS never showed it. `(async)` on a non-async function
+moves the body to the thread pool, after which `window.close()` and
+`run_on_main_thread` post to the event loop instead of running inline — note
+that `run_on_main_thread` executes the closure *immediately* when the caller is
+already the main thread, so it is not a defence on its own.
 
 ---
 
@@ -180,9 +194,14 @@ JSON round-trip them) or `deepStrictEqual` rejects them on prototype identity.
 - **`zune-jpeg` is pinned to `0.5.16-rc1`.** Not used directly; it arrives via
   `image` → `tiff`, and 0.5.15 does not compile on rustc 1.97. Remove the pin
   when a stable 0.5.16 ships.
-- **Windows has never been run.** The code and coordinate handling exist but are
-  unverified. There is no cross-compilation path from macOS for MSVC — it must
-  be built on Windows.
+- **Windows works.** Capture, region select, editor markup and save have all
+  been run on Windows 11. There is still no cross-compilation path from macOS
+  for MSVC — it must be built on Windows, with the MSVC toolchain and VS Build
+  Tools (VCTools workload). Coordinate handling on mixed-DPI multi-monitor
+  setups remains unverified; see the `ponytail:` note on `capture::to_dip`.
+- **WebView2 is far less forgiving than WKWebView about reentrancy.** Invariant
+  11 is the rule this produced. Anything that destroys or creates a webview
+  from inside a webview callback will deadlock.
 
 ---
 

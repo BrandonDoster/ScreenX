@@ -6,7 +6,7 @@ ScreenX is a screen capture tool for macOS and Windows. It keeps everything on
 your computer. It does not upload your screenshots, it does not need an account,
 and it contains no network code.
 
-The application is 6.9 MB.
+The application is 6.9 MB on macOS. The Windows build is not measured yet.
 
 ---
 
@@ -28,7 +28,7 @@ The application is 6.9 MB.
 
 ### macOS
 
-1. Open `ScreenX_0.2.0_x64.dmg`.
+1. Open `ScreenX_0.2.1_x64.dmg`.
 2. Move ScreenX into your Applications folder.
 3. Start ScreenX.
 
@@ -44,8 +44,19 @@ You do this one time only.
 
 ### Windows
 
-1. Run the installer.
+1. Run `ScreenX_0.2.1_x64-setup.exe`.
 2. Start ScreenX.
+
+The application is not signed yet. Windows shows a blue **Windows protected
+your PC** window the first time. To continue:
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+You do this one time only.
+
+ScreenX needs the Microsoft Edge WebView2 Runtime. Windows 11 has it already.
+On Windows 10, the installer gets it for you.
 
 ---
 
@@ -396,8 +407,13 @@ side is complete.
 **A signed application.** Both builds are unsigned. macOS and Windows both warn
 you the first time you start ScreenX.
 
-**A tested Windows build.** The Windows code is written, but nobody has run it
-yet. Build it on Windows and report what breaks.
+**A test on more than one monitor on Windows.** ScreenX now runs on Windows.
+Version 0.2.1 fixes a fault that stopped the program after you chose an area.
+Screenshots, markup and saving are all tested on Windows 11 with one monitor.
+
+Two monitors with different scale settings are not tested on Windows. The
+position of your selection can be a small number of pixels out. Report what you
+see.
 
 ---
 

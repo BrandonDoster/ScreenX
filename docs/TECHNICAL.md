@@ -24,6 +24,7 @@ For a code map aimed at AI coding assistants, see [`../AGENTS.md`](../AGENTS.md)
 13. [Tests](#13-tests)
 14. [Things that will bite you](#14-things-that-will-bite-you)
 15. [History](#15-history)
+16. [WebView2 reentrancy, and the deadlock it caused](#16-webview2-reentrancy-and-the-deadlock-it-caused)
 
 ---
 
@@ -109,7 +110,7 @@ reference/                third-party source kept for comparison. Not compiled,
                           not committed, never copied from.
 ```
 
-`lib.rs` is the largest file at about 830 lines. It holds the shared state, the
+`lib.rs` is the largest file at about 860 lines. It holds the shared state, the
 tray menu, the hotkey registration, the three capture flows, the window builders
 and all the commands the web views can call. Everything else is a focused module
 that `lib.rs` calls into.
@@ -546,9 +547,13 @@ the tainted canvas that broke saving.
 not in the list and cannot be highlighted. This is a system limit. It is also
 correct behaviour for this feature: you cannot point at a window you cannot see.
 
-**Window creation belongs on the main thread.** Commands run on worker threads.
-`on_main` exists for this. Capture can happen anywhere; opening a window should
-not.
+**Window creation belongs on the main thread, and a command must not already be
+on it.** A plain `#[tauri::command]` runs inline on the thread that received the
+IPC message, which is not a worker thread; on Windows it is inside WebView2's
+message callback. Any command that opens or closes a window therefore needs
+`#[tauri::command(async)]`. `on_main` is not a defence on its own —
+`run_on_main_thread` executes the closure immediately if the caller is already
+the main thread. See section 16.
 
 **The `screenx:` scheme needs its CORS header.** See section 4. Removing it
 breaks saving in a way that looks like an operating system permission problem.
@@ -578,3 +583,63 @@ version is in the git history up to commit `d2db785`.
 GIF recording existed in 0.1 and is not in 0.2. It is paused, not abandoned.
 The parts of it that were hard — frame pacing and palette handling — are in the
 history if they are wanted back.
+
+The code was written on macOS and Windows was not run at all until 0.2.1. The
+first thing tried on Windows deadlocked; section 16 is what that turned out to
+be.
+
+---
+
+## 16. WebView2 reentrancy, and the deadlock it caused
+
+Everything in 0.2.0 worked on macOS. On Windows, choosing an area froze the
+process: no window, no output, "Not Responding" in the title bar, and no CPU
+use. Nothing had been logged, so the hang was somewhere inside
+`region_selected` before its first `println!`.
+
+The cause was an assumption that reads as obviously true and is not:
+
+```rust
+/// Commands run on a worker thread; window creation belongs on the main one.
+fn on_main(app: &AppHandle, image: RgbaImage, title: String) {
+```
+
+Two facts break it.
+
+**A synchronous command does not run on a worker thread.** In
+`tauri-macros/src/command/wrapper.rs` the default is `ExecutionContext::Blocking`,
+which runs the body inline on the thread that received the IPC message. For
+WebView2 that thread is inside the `WebMessageReceived` callback of the webview
+that sent the message.
+
+**`run_on_main_thread` does not always defer.** `send_user_message` in
+`tauri-runtime-wry/src/lib.rs` checks whether the caller is already the main
+thread, and if so calls `handle_user_message` immediately instead of posting to
+the event loop. So does `WebviewWindow::close()`.
+
+Put together, `region_selected` did two things inside the overlay's own
+WebView2 callback:
+
+1. `close_overlays()` destroyed the `ICoreWebView2Controller` of the webview
+   that was dispatching the message.
+2. `open_editor()` reached `WebViewBuilder::build()`, which calls
+   `webview2_com::wait_with_pump` — a nested Win32 message pump.
+
+Microsoft's WebView2 documentation forbids both: you may not run a nested
+message loop inside an event handler, and you may not tear the webview down
+from within its own callback. Doing either deadlocks the browser process.
+
+WKWebView tolerates both, which is why macOS never showed it. The bug was not
+in the capture code, the coordinate handling, or the `screenx:` scheme — all of
+which were the obvious suspects, and all of which were correct.
+
+The fix is `#[tauri::command(async)]` on every command that opens or closes a
+window: `region_selected`, `window_selected`, `region_cancelled` and
+`close_window`. On a non-async function that attribute moves the body to the
+runtime's thread pool, after which `close()` and `run_on_main_thread` both take
+their posting path and the work happens on the event loop instead of inside a
+webview callback.
+
+The self-check asserts this directly. `selfcheck_report` is invoked from a real
+webview and compares its thread against the one recorded in `MAIN_THREAD` at
+startup, so dropping the attribute fails a check rather than hanging a user.
