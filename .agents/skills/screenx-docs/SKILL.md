@@ -54,10 +54,13 @@ Contents list → Install → First run → the two capture paths → Editor →
 Settings → Naming → Shortcuts → Troubleshooting → For developers → What is not
 here yet → Licence.
 
-The **"What is not here yet"** section is not optional. It currently records
-that GIF recording is parked, that neither build is signed, and that Windows
-has never been run. Keep it honest and current; it is the first thing a reader
-checks when something is missing.
+The **"What is not here yet"** section is not optional. It is the first thing a
+reader checks when something is missing, so it has to be current. Read it in
+`README.md` rather than trusting any summary of it, including one in this file.
+
+When something on that list starts working, it does not just get deleted.
+Replace it with what is now true and what is still not: a limitation you have
+retired is exactly the thing a reader needs told.
 
 ---
 
@@ -179,28 +182,81 @@ why it is missing.
 
 ---
 
-## 5. Before you finish
+## 5. Facts that live in more than one file
+
+This is where drift comes from. A fact written in three documents gets updated
+in one, and the other two keep asserting the old thing for months. Every entry
+below has actually diverged at least once.
+
+| Fact | Lives in |
+| --- | --- |
+| What works on each platform, and what is unverified | `README.md` "What is not here yet"; `docs/TECHNICAL.md` platform sections; `AGENTS.md` "Platform notes" |
+| Bundle and installer sizes | `README.md` intro; `docs/TECHNICAL.md` "Sizes and timings"; `AGENTS.md` "Orientation" |
+| Test and self-check counts | `docs/TECHNICAL.md` section 13; `AGENTS.md` "Orientation" |
+| Version number | `package.json`; `src-tauri/Cargo.toml`; `src-tauri/Cargo.lock`; `src-tauri/tauri.conf.json`; installer filenames in `README.md` |
+| An invariant | `AGENTS.md` numbered list; `docs/TECHNICAL.md` "Things that will bite you" |
+| Source file line counts and anchors | `AGENTS.md` file map and "Where do I change X?" |
+
+**Changing one means grepping for the others.** Do not rely on remembering which
+files mention it — search for the old value:
 
 ```sh
-npm test          # 51 tests; docs changes should not break them, but check
-npm run selfcheck # if you touched anything the docs describe as verified
+grep -rn "<the old number or claim>" README.md docs/ AGENTS.md .agents/
 ```
 
-Verify the references resolve:
+Retiring a limitation is the case that gets missed most, because the obvious
+file gets fixed and the other two read as prose you already skimmed.
+
+---
+
+## 6. Before you finish
+
+Run the checks; do not recall the numbers.
 
 ```sh
+# Counts. Compare against AGENTS.md "Orientation" and TECHNICAL.md section 13.
+node --test --test-reporter=tap tests/*.test.mjs | grep '^# tests'
+cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | grep 'test result'
+npm run selfcheck            # count the "ok"/"FAIL" lines; that is the total
+
+# Line counts and anchors for the AGENTS.md file map and its tables.
+wc -l src-tauri/src/*.rs ui/*.js tests/*.mjs
+grep -nE "^(pub )?(async )?fn |^(pub )?struct |^const |^pub static " src-tauri/src/*.rs
+grep -n "const TOOLS\|invoke_handler" ui/editor.js src-tauri/src/lib.rs
+
+# Version agreement across every file that carries it.
+grep -o '"version": "[^"]*"' package.json src-tauri/tauri.conf.json
+grep -m1 '^version' src-tauri/Cargo.toml
+grep -oE 'ScreenX_[0-9]+\.[0-9]+\.[0-9]+' README.md | sort -u
+
+# Image references. Every "placeholder" must be a labelled blockquote, not a
+# broken image tag.
 grep -oE 'docs/images/[a-z-]+\.png' README.md | sort -u | while read f; do
   [ -f "$f" ] && echo "ok   $f" || echo "placeholder $f"
 done
 ```
 
-Confirm each "placeholder" line is genuinely a labelled placeholder and not a
-broken image tag.
+### Sizes
 
-Check that a claim you wrote is still true. The docs quote measured figures —
-6.9 MB bundle, 3.0 MB dmg, 114-236 ms capture, 0.6 ms window list, test counts.
-If you changed something that moves one of those, re-measure it or remove it.
-Do not carry a stale number forward.
+Sizes are **decimal MB (10^6 bytes)**, matching Finder. `ls -l` and PowerShell's
+`/1MB` give binary MiB, which is 5% smaller and reads as a different number next
+to an existing figure — that mismatch has already shipped once.
+
+Always record which build a size came from. A universal macOS binary is roughly
+twice a single-arch one, so an unlabelled size silently becomes wrong the moment
+the release shape changes.
+
+```sh
+gh release view <tag> --json assets --jq '.assets[]|"\(.size)\t\(.name)"'
+stat -c '%s' src-tauri/target/release/screenx.exe
+```
+
+### Claims about what works
+
+Anything the docs say is verified must name how. If you fixed something a stub
+could not catch, `npm run selfcheck` should gain a line for it, and that is what
+the docs point at. A claim with no check behind it is the one that goes stale
+without anyone noticing.
 
 ---
 
@@ -211,4 +267,10 @@ Do not carry a stale number forward.
 - An invariant in `AGENTS.md` must name a real bug.
 - Documentation that claims something works must point at how that was verified.
 - If you cannot verify a claim, say so in the document rather than omitting it.
-  "Windows has never been run" is more useful than silence.
+  A stated "this is untested on X" is more useful than silence, and it is the
+  sentence a later session will come back and retire.
+- **This file states rules, not facts about ScreenX.** Every product fact it
+  once carried — the bundle size, what was unverified — went stale and then
+  taught the wrong thing to the next session, because this is what gets read
+  first. If you want to write a number or a status here, write the command that
+  prints it instead.

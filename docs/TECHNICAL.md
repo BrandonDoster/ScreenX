@@ -39,7 +39,8 @@ ScreenX is a [Tauri](https://tauri.app) application. That means:
   on macOS, WebView2 on Windows.
 
 There is no bundled browser engine, which is why the whole application is
-6.9 MB.
+6.9 MB on macOS and 9.8 MB on Windows rather than the hundreds of megabytes
+Electron needed.
 
 There is no front-end build step. No bundler, no TypeScript, no npm packages in
 the browser. The files in `ui/` are loaded exactly as they are on disk. If you
@@ -472,7 +473,10 @@ npm run dev          # debug build with a live web view
 npm run build        # release build and installers
 ```
 
-Output goes to `src-tauri/target/release/bundle/`.
+Installers go to `src-tauri/target/release/bundle/`. The bare binary is left at
+`src-tauri/target/release/screenx.exe`, and on Windows that is shipped too — the
+release workflow attaches it as the portable download, because the bundler only
+publishes installers.
 
 The release profile uses `opt-level = 3` rather than `opt-level = "z"`. Capture
 and PNG encoding are the hot paths, and the size win comes from LTO and
@@ -481,22 +485,48 @@ in a web view callback into a hard crash is a bad trade for a few kilobytes.
 
 ### Sizes and timings
 
-Measured on an Intel Mac against a 3584 × 2240 Retina display:
+Sizes are decimal MB (10^6 bytes), which is what Finder reports. Record the
+build each one came from; a universal binary is roughly twice a single-arch one,
+so an unlabelled size goes stale silently.
+
+Timings measured on an Intel Mac against a 3584 × 2240 Retina display:
 
 | | Value |
 | --- | --- |
-| macOS app bundle | 6.9 MB |
-| dmg | 3.0 MB |
 | Full-screen capture | 114–236 ms |
 | PNG encode, full screen | 35 ms |
 | Window list with positions | 0.6 ms |
 
+Sizes, from the 0.2.1 release artifacts:
+
+| | Value | Build |
+| --- | --- | --- |
+| macOS app bundle | 6.9 MB | Intel, single arch |
+| dmg | 5.9 MB | universal |
+| `screenx.exe` | 9.8 MB | x64 |
+| Windows installer | 2.3 MB | x64 |
+
+The 3.0 MB dmg quoted before 0.2.1 was a single-architecture build. The release
+dmg is universal, which is where the rest comes from.
+
 ### Windows
 
 The Windows build has to be produced on Windows. There is no cross-compilation
-path from macOS for the MSVC target. **It has never been run.** The code is
-written and the coordinate handling is in place, but nobody has started the
-program on Windows yet.
+path from macOS for the MSVC target, so it needs the MSVC toolchain and the
+Visual Studio Build Tools VCTools workload.
+
+It runs. Capture, region select, the editor and saving were all exercised on
+Windows 11 in 0.2.1, and the self-check passes there. The first attempt
+deadlocked; section 16 is why. What is still unverified is more than one
+monitor, and monitors at different scale factors in particular — see the
+`ponytail:` note on `capture::to_dip`.
+
+The binary is self-contained. Its only imports are Windows system DLLs, and the
+frontend is compiled in, so `screenx.exe` runs from anywhere with nothing beside
+it. That is why the release ships it as a portable download next to the
+installer. The installer earns its place for the Start menu entry and the
+Apps & features uninstall entry, not for the WebView2 Runtime, which Windows 11
+includes.
 
 ### Signing
 

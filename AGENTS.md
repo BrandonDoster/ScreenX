@@ -19,7 +19,8 @@ selection overlay, the annotation editor and the settings form. Fully offline �
 - Rust entry point: `src-tauri/src/lib.rs` → `run()` at the bottom.
 - Pages: `ui/*.html` + matching `.js`. No framework, no bundler, no build step.
 - One JSON settings file. GIF recording is deliberately absent (parked).
-- 6.9 MB bundle. 23 Rust tests, 28 JS tests, 7 self-checks. All must stay green.
+- 6.9 MB on macOS, 9.8 MB on Windows.
+- 23 Rust tests, 28 JS tests, 7 self-checks. All must stay green.
 
 ---
 
@@ -27,17 +28,17 @@ selection overlay, the annotation editor and the settings form. Fully offline �
 
 | File | Lines | Holds |
 | --- | ---: | --- |
-| `src-tauri/src/lib.rs` | 860 | State, tray, hotkeys, capture flows, window builders, all commands |
-| `src-tauri/src/capture.rs` | 408 | xcap wrappers, `Rect` maths, coordinate normalisation, encoding, saving |
-| `src-tauri/src/naming.rs` | 329 | Filename pattern expansion + its tests |
-| `src-tauri/src/settings.rs` | 201 | The single JSON settings file |
-| `src-tauri/src/selfcheck.rs` | 199 | Debug only. Diagnostics needing a real webview/screen |
-| `src-tauri/src/docshots.rs` | 212 | Debug only. Generates `docs/images/*` |
-| `ui/editor.js` | 752 | Annotation editor |
-| `ui/overlay.js` | 347 | Selection overlay, one instance per monitor |
-| `ui/settings.js` | 307 | Settings form, hotkey recorder |
-| `ui/blur.js` | 73 | Blur, shared by editor and self-check |
-| `tests/*.mjs` | ~610 | DOM stubs + behaviour tests for overlay and editor |
+| `src-tauri/src/lib.rs` | 863 | State, tray, hotkeys, capture flows, window builders, all commands |
+| `src-tauri/src/capture.rs` | 411 | xcap wrappers, `Rect` maths, coordinate normalisation, encoding, saving |
+| `src-tauri/src/naming.rs` | 332 | Filename pattern expansion + its tests |
+| `src-tauri/src/settings.rs` | 204 | The single JSON settings file |
+| `src-tauri/src/selfcheck.rs` | 202 | Debug only. Diagnostics needing a real webview/screen |
+| `src-tauri/src/docshots.rs` | 215 | Debug only. Generates `docs/images/*` |
+| `ui/editor.js` | 755 | Annotation editor |
+| `ui/overlay.js` | 350 | Selection overlay, one instance per monitor |
+| `ui/settings.js` | 310 | Settings form, hotkey recorder |
+| `ui/blur.js` | 76 | Blur, shared by editor and self-check |
+| `tests/*.mjs` | 624 | DOM stubs + behaviour tests for overlay and editor |
 
 `reference/` holds third-party source for behavioural comparison. **Never
 compile it, never copy from it, never commit it.** It is gitignored.
@@ -48,16 +49,16 @@ compile it, never copy from it, never commit it.** It is gitignored.
 
 | Task | Go to |
 | --- | --- |
-| Add a command the UI can call | `lib.rs` — write `#[tauri::command]`, then add it to `invoke_handler!` (line 795). If it opens or closes a window, read invariant 11 first |
+| Add a command the UI can call | `lib.rs` — write `#[tauri::command]`, then add it to `invoke_handler!` (line 798). If it opens or closes a window, read invariant 11 first |
 | Add a setting | `settings.rs` `Settings` struct + its `Default`, then a control in `ui/settings.html`, then `fill()` and `collect()` in `ui/settings.js` |
-| Add a filename token | `naming.rs` — `TOKENS` array (line 27, **longest first**) and `expand()` (line 101), then the README table |
-| Add an editor tool | `ui/editor.js` — `TOOLS` array (line 18), a `case` in `drawShape()`, and `shapeBounds()` if the shape is not `x1,y1,x2,y2` |
-| Change how a window is opened | `lib.rs` — `open_settings` (105), `open_editor` (126), overlays inside `start_region_select` (283) |
-| Change what happens after a capture | `lib.rs` — `deliver()` (196) |
+| Add a filename token | `naming.rs` — `TOKENS` array (line 30, **longest first**) and `expand()` (line 104), then the README table |
+| Add an editor tool | `ui/editor.js` — `TOOLS` array (line 21), a `case` in `drawShape()`, and `shapeBounds()` if the shape is not `x1,y1,x2,y2` |
+| Change how a window is opened | `lib.rs` — `open_settings` (108), `open_editor` (129), overlays inside `start_region_select` (286) |
+| Change what happens after a capture | `lib.rs` — `deliver()` (199) |
 | Change region/window selection behaviour | `ui/overlay.js` — dwell logic near the top, `finish()` for the outcome |
-| Change the tray menu | `lib.rs` — `build_tray()` (489) |
-| Change hotkey recording | `ui/settings.js` — `toAccelerator()`; registration in `lib.rs` `register_hotkeys()` (456) |
-| Touch coordinates | `capture.rs` — `to_dip()` (83) and `crop_to_rect()` (198). Read invariant 1 first |
+| Change the tray menu | `lib.rs` — `build_tray()` (492) |
+| Change hotkey recording | `ui/settings.js` — `toAccelerator()`; registration in `lib.rs` `register_hotkeys()` (459) |
+| Touch coordinates | `capture.rs` — `to_dip()` (86) and `crop_to_rect()` (201). Read invariant 1 first |
 
 ---
 
@@ -97,7 +98,7 @@ As and Copy. It looks exactly like an OS permission problem and is not.
 remove the frame keyed to that window. Otherwise every capture leaks megabytes
 for the process lifetime.
 
-**7. Window creation belongs on the main thread.** Use `on_main()` (lib.rs 229).
+**7. Window creation belongs on the main thread.** Use `on_main()` (lib.rs 232).
 Capture itself can run anywhere. Note that `on_main` only defers when the caller
 is not already the main thread, so it does not stand alone — see invariant 11.
 
