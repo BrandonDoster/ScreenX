@@ -31,7 +31,8 @@ use overlay::{Outcome, Overlay};
 /// Something asked for a capture. Sent from the tray and hotkey threads.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Request {
-    Region,
+    Region { delayed: bool },
+    Fullscreen { delayed: bool },
     Quit,
 }
 
@@ -66,19 +67,52 @@ impl App {
         }
     }
 
-    /// Read the screen and enter the overlay.
-    fn begin_region(&mut self, ctx: &egui::Context) {
-        let shots = match capture::capture_monitors() {
-            Ok(shots) => shots,
-            Err(err) => return self.report(err),
-        };
-        // ponytail: primary monitor only for now. One overlay per monitor is a
-        // second viewport, not a different design; add it when the single
-        // monitor path is proven.
-        let Some(shot) = shots.into_iter().next() else {
-            return self.report("no monitors found".into());
-        };
+    /// Wait before reading the screen, when asked to.
+    ///
+    /// Photographing a menu needs this: the keyboard belongs to the menu's
+    /// tracking loop, so the hotkey does not arrive until the menu closes.
+    /// Only the delayed entries pay it — charging every capture for the delay
+    /// made the ordinary one feel slow.
+    fn wait(delayed: bool) {
+        let ms = settings::get().capture_delay_ms;
+        if delayed && ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+    }
 
+    /// Capture whichever monitor the work is for.
+    fn shoot(&mut self, delayed: bool) -> Option<capture::MonitorShot> {
+        Self::wait(delayed);
+        match capture::capture_monitors() {
+            // ponytail: primary monitor only. A second monitor is a second
+            // viewport rather than a different design; add it when someone has
+            // two to test it on.
+            Ok(shots) => match shots.into_iter().next() {
+                Some(shot) => Some(shot),
+                None => {
+                    self.report("no monitors found".into());
+                    None
+                }
+            },
+            Err(err) => {
+                self.report(err);
+                None
+            }
+        }
+    }
+
+    /// Capture a whole monitor and save it, with no overlay in between.
+    fn capture_fullscreen(&mut self, delayed: bool) {
+        let Some(shot) = self.shoot(delayed) else { return };
+        match capture::save_image(&shot.image, &shot.name) {
+            Ok(path) => self.report(format!("saved {}", path.display())),
+            Err(err) => self.report(err),
+        }
+    }
+
+    /// Read the screen and enter the overlay.
+    fn begin_region(&mut self, ctx: &egui::Context, delayed: bool) {
+        let Some(shot) = self.shoot(delayed) else { return };
         let bounds = shot.bounds;
         self.mode = Mode::Selecting(Overlay::new(ctx, shot));
 
@@ -137,9 +171,14 @@ impl eframe::App for App {
                 Request::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                 // A second press while an overlay is up is the user asking
                 // again for what is already on screen.
-                Request::Region => {
+                Request::Region { delayed } => {
                     if matches!(self.mode, Mode::Idle) {
-                        self.begin_region(ctx);
+                        self.begin_region(ctx, delayed);
+                    }
+                }
+                Request::Fullscreen { delayed } => {
+                    if matches!(self.mode, Mode::Idle) {
+                        self.capture_fullscreen(delayed);
                     }
                 }
             }
@@ -250,9 +289,15 @@ fn memcheck(size: (u32, u32), seconds: u64) -> eframe::Result<()> {
         "ScreenX memcheck",
         options,
         Box::new(move |cc| {
+            let started = std::time::Instant::now();
             let mut overlay = Overlay::new(&cc.egui_ctx, shot);
+            eprintln!("[memcheck] texture ready in {:?}", started.elapsed());
+            let mut first_frame = Some(std::time::Instant::now());
             Ok(Box::new(Held {
                 draw: Box::new(move |ctx| {
+                    if let Some(at) = first_frame.take() {
+                        eprintln!("[memcheck] first frame at {:?}", at.elapsed());
+                    }
                     overlay.update(ctx);
                     ctx.request_repaint();
                     if std::time::Instant::now() >= deadline {
@@ -331,12 +376,15 @@ fn listen_for_hotkeys(sender: Sender<Request>, region: Option<u32>) {
     std::thread::spawn(move || loop {
         if let Ok(event) = hotkeys.try_recv() {
             if Some(event.id) == region && event.state == global_hotkey::HotKeyState::Pressed {
-                let _ = sender.send(Request::Region);
+                let _ = sender.send(Request::Region { delayed: false });
             }
         }
         if let Ok(event) = menu.try_recv() {
             let request = match event.id.as_ref() {
-                "region" => Some(Request::Region),
+                "region" => Some(Request::Region { delayed: false }),
+                "fullscreen" => Some(Request::Fullscreen { delayed: false }),
+                "region-delayed" => Some(Request::Region { delayed: true }),
+                "fullscreen-delayed" => Some(Request::Fullscreen { delayed: true }),
                 "quit" => Some(Request::Quit),
                 _ => None,
             };
@@ -351,9 +399,27 @@ fn listen_for_hotkeys(sender: Sender<Request>, region: Option<u32>) {
 fn build_tray(_sender: Sender<Request>) -> Option<tray_icon::TrayIcon> {
     let menu = Menu::new();
     let region = MenuItem::with_id("region", "Capture Region", true, None);
+    let fullscreen = MenuItem::with_id("fullscreen", "Capture Entire Screen", true, None);
+    // The delay is what makes photographing a menu possible, so it stays
+    // reachable — just not charged to every capture.
+    let region_delayed =
+        MenuItem::with_id("region-delayed", "Capture Region After Delay", true, None);
+    let fullscreen_delayed = MenuItem::with_id(
+        "fullscreen-delayed",
+        "Capture Entire Screen After Delay",
+        true,
+        None,
+    );
     let quit = MenuItem::with_id("quit", "Quit ScreenX", true, None);
-    menu.append_items(&[&region, &PredefinedMenuItem::separator(), &quit])
-        .ok()?;
+    menu.append_items(&[
+        &region,
+        &fullscreen,
+        &region_delayed,
+        &fullscreen_delayed,
+        &PredefinedMenuItem::separator(),
+        &quit,
+    ])
+    .ok()?;
 
     TrayIconBuilder::new()
         .with_menu(Box::new(menu))
