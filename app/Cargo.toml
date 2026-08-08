@@ -1,0 +1,33 @@
+[package]
+name = "screenx"
+version = "0.3.0"
+description = "Local screen capture and annotation"
+license = "GPL-3.0-only"
+edition = "2021"
+rust-version = "1.77.2"
+
+[dependencies]
+screenx-core = { path = "../core" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Software rasterised rather than wgpu: the overlay draws one full-screen image
+# and a rectangle, so a GPU backend would cost a device, a swapchain and its
+# driver allocations for work a blit already does. Memory is the point here.
+eframe = { version = "0.29", default-features = false, features = [
+    "glow",
+    "default_fonts",
+] }
+egui = "0.29"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+    "NSWindow",
+    "NSResponder",
+    "NSApplication",
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
