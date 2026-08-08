@@ -45,8 +45,24 @@ You do this one time only.
 
 ### Windows
 
+There are two Windows downloads. Use the one that you prefer.
+
+**To install ScreenX:**
+
 1. Run `ScreenX_0.2.1_x64-setup.exe`.
 2. Start ScreenX.
+
+The installer puts ScreenX in your Start menu. It also adds ScreenX to **Apps &
+features**, so you can remove it there.
+
+**To run ScreenX without an installation:**
+
+1. Put `screenx.exe` where you want to keep it.
+2. Start it.
+
+`screenx.exe` is one file and it needs nothing next to it. To remove ScreenX,
+delete the file. Your settings stay in `%APPDATA%\ScreenX`. Delete that folder
+too if you do not want them.
 
 The application is not signed yet. Windows shows a blue **Windows protected
 your PC** window the first time. To continue:
@@ -56,8 +72,11 @@ your PC** window the first time. To continue:
 
 You do this one time only.
 
-ScreenX needs the Microsoft Edge WebView2 Runtime. Windows 11 has it already.
-On Windows 10, the installer gets it for you.
+ScreenX needs the Microsoft Edge WebView2 Runtime. Windows 11 has it already,
+and so do most Windows 10 computers, because Microsoft Edge installs it.
+
+If the runtime is absent, the installer gets it for you. `screenx.exe` cannot do
+this. On a Windows 10 computer that has no runtime, use the installer.
 
 ---
 

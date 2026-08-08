@@ -56,7 +56,20 @@ jobs:
             Unsigned builds. macOS and Windows both warn on first launch.
 
             - macOS: `.dmg` (universal, Apple Silicon and Intel)
-            - Windows: `.exe` NSIS installer (x64)
+            - Windows: `-setup.exe` installer, or `screenx.exe` to run portable
+
+            The portable build needs the Microsoft Edge WebView2 Runtime, which
+            Windows 11 already has. The installer fetches it if it is missing.
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
+
+      # The bundler only publishes installers, but the binary it produces is
+      # already self-contained: its only imports are Windows system DLLs, and
+      # the frontend is compiled into it. So ship it as-is for anyone who wants
+      # no install. Runs after tauri-action, which is what creates the release.
+      - name: Attach the portable Windows binary
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" src-tauri/target/release/screenx.exe --clobber
