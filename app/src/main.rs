@@ -218,7 +218,75 @@ fn parse_hotkey(accelerator: &str) -> Option<HotKey> {
     Some(HotKey::new(Some(modifiers), code?))
 }
 
+/// Stand the overlay up on a synthetic capture and hold it, so its memory can
+/// be measured from outside with `ps`.
+///
+/// The cost of the overlay is its texture and its framebuffer, neither of which
+/// cares where the pixels came from — so this measures the real thing without
+/// needing Screen Recording, which a shell cannot be granted.
+fn memcheck(size: (u32, u32), seconds: u64) -> eframe::Result<()> {
+    let (width, height) = size;
+    let image = image::RgbaImage::from_fn(width, height, |x, y| {
+        image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255])
+    });
+    let shot = capture::MonitorShot {
+        id: 0,
+        bounds: capture::Rect { x: 0, y: 0, width: width / 2, height: height / 2 },
+        scale: 2.0,
+        name: "memcheck".into(),
+        image,
+    };
+    eprintln!("[memcheck] {width}x{height} for {seconds}s, pid {}", std::process::id());
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size(egui::vec2(width as f32, height as f32))
+            .with_decorations(false)
+            .with_resizable(false),
+        ..Default::default()
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    eframe::run_native(
+        "ScreenX memcheck",
+        options,
+        Box::new(move |cc| {
+            let mut overlay = Overlay::new(&cc.egui_ctx, shot);
+            Ok(Box::new(Held {
+                draw: Box::new(move |ctx| {
+                    overlay.update(ctx);
+                    ctx.request_repaint();
+                    if std::time::Instant::now() >= deadline {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }),
+            }))
+        }),
+    )
+}
+
+/// Runs one closure per frame. Only the measurement uses it.
+struct Held {
+    draw: Box<dyn FnMut(&egui::Context)>,
+}
+
+impl eframe::App for Held {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        (self.draw)(ctx);
+    }
+}
+
 fn main() -> eframe::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(index) = args.iter().position(|a| a == "--memcheck") {
+        let parse = |i: usize, fallback: u32| {
+            args.get(i).and_then(|v| v.parse().ok()).unwrap_or(fallback)
+        };
+        let width = parse(index + 1, 3584);
+        let height = parse(index + 2, 2240);
+        let seconds = parse(index + 3, 8) as u64;
+        return memcheck((width, height), seconds);
+    }
+
     let (sender, receiver) = std::sync::mpsc::channel();
 
     // Held for the life of the process: dropping either unregisters it.

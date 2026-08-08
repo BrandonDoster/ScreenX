@@ -24,15 +24,26 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    /// Uploads the capture as a texture. One copy, held until the overlay is
-    /// dismissed; this is the whole of what the overlay costs in memory.
+    /// Uploads the capture as a texture sized to what the screen can show.
+    ///
+    /// The overlay draws in points, so on a Retina panel a full-resolution
+    /// texture carries four times the pixels it can ever display — and it is
+    /// paid for three times over, in the source buffer, egui's copy of it and
+    /// the texture itself. Scaling first costs one resize and saves two thirds
+    /// of that. The selection is still cropped from the untouched capture, so
+    /// nothing about the result changes.
     pub fn new(ctx: &egui::Context, shot: MonitorShot) -> Self {
+        let (width, height) = (shot.bounds.width, shot.bounds.height);
+        let scaled;
+        let source = if shot.image.width() == width && shot.image.height() == height {
+            &shot.image
+        } else {
+            scaled = image::imageops::thumbnail(&shot.image, width, height);
+            &scaled
+        };
         let image = egui::ColorImage::from_rgba_unmultiplied(
-            [
-                shot.image.width() as usize,
-                shot.image.height() as usize,
-            ],
-            shot.image.as_raw(),
+            [source.width() as usize, source.height() as usize],
+            source.as_raw(),
         );
         let texture = ctx.load_texture("capture", image, egui::TextureOptions::LINEAR);
         Self {
