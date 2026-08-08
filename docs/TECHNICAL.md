@@ -522,7 +522,48 @@ includes.
 
 ### Signing
 
-Neither build is signed. Both operating systems warn on first run.
+Neither build is signed, and neither will be. A Developer ID costs 99 USD a
+year and this project does not carry that cost, so the release artefacts stay
+unsigned and unnotarised. That decision has three consequences worth knowing
+before someone files it as a bug.
+
+**Control-click → Open no longer works on macOS.** It is the bypass everyone
+learned, and macOS 15 removed it. On 15 and later the first launch of a
+quarantined unsigned app offers only Done, and the approval moved to System
+Settings → Privacy & Security → Open Anyway — several clicks deep, in a place
+nobody thinks to look.
+
+**Only downloaded copies are affected.** Gatekeeper's hard block needs the
+`com.apple.quarantine` attribute, which the browser sets and a local build
+never has. `npm run build` produces a bundle that launches immediately, and
+`xattr -dr com.apple.quarantine` puts a downloaded one in the same state.
+
+**Homebrew is the way around all of it.** `brew install --cask` does not set
+the quarantine attribute, so a cask install starts with no warning and no trip
+through System Settings. `Casks/screenx.rb` lives in this repository rather
+than a `homebrew-tap` one; the name of a tap repository has to begin with
+`homebrew-`, so the short `brew install --cask user/tap/screenx` form would
+need a second repository, and bumping a cask there from this repository's
+release workflow would need a personal access token — a credential outliving
+its one job. The cost of keeping it here is the explicit URL users pass to
+`brew tap`. The release workflow rewrites the version and sha256 lines after a
+non-prerelease tag builds, and pushes that to master with the `GITHUB_TOKEN`
+it already holds. This is why the README leads with Homebrew and treats the
+.dmg as the fallback.
+
+**Tauri does not sign at all by default**, which matters beyond Gatekeeper.
+TCC keys the Screen Recording grant to code identity, and with no signature it
+falls back to the binary's hash — so every rebuild looks like a new app and the
+permission has to be granted again. Ad-hoc signing is free and fixes that:
+
+```sh
+codesign --force --deep --sign - ScreenX.app
+```
+
+This gives the bundle a stable `com.screenx.app` identity and the TCC grant
+survives rebuilds. Set `APPLE_SIGNING_IDENTITY: '-'` in the `tauri-action` env
+block to have releases do the same. It does nothing for the quarantine warning
+— ad-hoc is not a trusted signature — but it stops the permission churn.
 
 ---
 

@@ -48,15 +48,34 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ad-hoc signature. It is free and it is not a trusted one, so
+          # Gatekeeper still warns — but TCC keys the Screen Recording grant to
+          # code identity, and unsigned falls back to the binary hash. Without
+          # this every update looks like a new app and the user has to grant
+          # the permission again. See docs/TECHNICAL.md, Signing.
+          APPLE_SIGNING_IDENTITY: '-'
         with:
           projectPath: .
           tagName: ${{ github.ref_name }}
           releaseName: 'ScreenX ${{ github.ref_name }}'
           releaseBody: |
-            Unsigned builds. macOS and Windows both warn on first launch.
+            **macOS — install with Homebrew. No warning:**
 
-            - macOS: `.dmg` (universal, Apple Silicon and Intel)
-            - Windows 11: `-setup.exe` installer, or `screenx.exe` to run portable
+            ```sh
+            brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
+            brew install --cask screenx
+            ```
+
+            Or download `ScreenX_VERSION_universal.dmg` below. These builds are
+            not signed by Apple, so macOS warns on a downloaded copy. Remove the
+            mark and it starts normally:
+
+            ```sh
+            xattr -dr com.apple.quarantine /Applications/ScreenX.app
+            ```
+
+            **Windows 11** — the `-setup.exe` installer, or `screenx.exe` to run
+            portable. Click **More info**, then **Run anyway**.
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
@@ -70,3 +89,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" src-tauri/target/release/screenx.exe --clobber
+
+      # The cask lives in this repository rather than a homebrew-tap one, so
+      # the bump needs no cross-repository token. Users pay for that with the
+      # explicit URL in `brew tap`. Pre-releases never move the cask.
+      - name: Point the Homebrew cask at this release
+        if: matrix.platform == 'macos-latest' && !contains(github.ref_name, '-')
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          dmg=$(find src-tauri/target -name 'ScreenX_*_universal.dmg' | head -1)
+          sha=$(shasum -a 256 "$dmg" | cut -d' ' -f1)
+          # actions/checkout leaves a detached HEAD at the tag with no local
+          # master, so fetch it into one before switching.
+          git fetch origin master:master
+          git checkout master
+          sed -i '' -E "s/^  version \".*\"/  version \"$version\"/" Casks/screenx.rb
+          sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$sha\"/" Casks/screenx.rb
+          git diff --quiet && exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am "chore: point the Homebrew cask at $version"
+          git push origin master

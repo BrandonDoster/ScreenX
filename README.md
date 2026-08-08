@@ -29,19 +29,28 @@ system, so it does not contain a browser.
 
 ### macOS
 
-1. Open `ScreenX_0.2.1_x64.dmg`.
-2. Move ScreenX into your Applications folder.
-3. Start ScreenX.
+Use [Homebrew](https://brew.sh). ScreenX starts with no warning.
 
-The application is not signed yet. macOS shows a warning the first time. To
-start it:
+```sh
+brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
+brew install --cask screenx
+```
 
-1. Open your Applications folder.
-2. Hold the Control key and click ScreenX.
-3. Click **Open**.
-4. Click **Open** again in the warning.
+To get a later version:
 
-You do this one time only.
+```sh
+brew upgrade --cask screenx
+```
+
+**From the .dmg instead.** ScreenX is not signed by Apple, so macOS blocks a
+copy you download. Open the .dmg, move ScreenX into your Applications folder,
+then run this one command in Terminal:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/ScreenX.app
+```
+
+ScreenX now starts normally. You do this one time only.
 
 ### Windows
 
@@ -421,8 +430,11 @@ npm run build      # make an installer
 **GIF recording.** An earlier version had it. It is paused until the screenshot
 side is complete.
 
-**A signed application.** Both builds are unsigned. macOS and Windows both warn
-you the first time you start ScreenX.
+**A signed application.** Both builds are unsigned, and there is no plan to
+sign them. An Apple Developer ID costs 99 USD each year, which this project
+does not spend. On macOS, install with Homebrew and you never see a warning.
+On Windows, you click through one. The [Install](#install) section has the
+steps.
 
 **A test on more than one monitor on Windows.** ScreenX now runs on Windows.
 Version 0.2.1 fixes a fault that stopped the program after you chose an area.
