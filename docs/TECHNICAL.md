@@ -38,9 +38,8 @@ ScreenX is a [Tauri](https://tauri.app) application. That means:
   CSS and JavaScript, shown in the operating system's own web view: WKWebView
   on macOS, WebView2 on Windows.
 
-There is no bundled browser engine, which is why the whole application is
-6.9 MB on macOS and 9.8 MB on Windows rather than the hundreds of megabytes
-Electron needed.
+There is no bundled browser engine, which is why the application is a few
+megabytes rather than the hundreds Electron needed.
 
 There is no front-end build step. No bundler, no TypeScript, no npm packages in
 the browser. The files in `ui/` are loaded exactly as they are on disk. If you
@@ -267,8 +266,8 @@ is worth writing if anyone reports drift.
 ### Region or window — `start_region_select`
 
 1. A worker thread lists the on-screen windows and captures every monitor.
-   The window list costs about 0.6 ms, so it is fetched before the overlay
-   opens rather than while the pointer is moving.
+   The window list costs well under a millisecond, so it is fetched before the
+   overlay opens rather than while the pointer is moving.
 2. For each monitor it encodes the capture as JPEG at quality 92 and stores it
    as a frame. JPEG keeps the overlay quick to draw; the crop still comes from
    the untouched capture held in Rust.
@@ -483,31 +482,24 @@ and PNG encoding are the hot paths, and the size win comes from LTO and
 stripping instead. `panic = "abort"` was removed deliberately: turning any panic
 in a web view callback into a hard crash is a bad trade for a few kilobytes.
 
-### Sizes and timings
+### Timings
 
-Sizes are decimal MB (10^6 bytes), which is what Finder reports. Record the
-build each one came from; a universal binary is roughly twice a single-arch one,
-so an unlabelled size goes stale silently.
+Measured on an Intel Mac against a 3584 × 2240 Retina display:
 
-Timings measured on an Intel Mac against a 3584 × 2240 Retina display:
-
-| | Value |
+| | Roughly |
 | --- | --- |
-| Full-screen capture | 114–236 ms |
-| PNG encode, full screen | 35 ms |
-| Window list with positions | 0.6 ms |
+| Full-screen capture | 100–250 ms |
+| PNG encode, full screen | ~35 ms |
+| Window list with positions | under 1 ms |
 
-Sizes, from the 0.2.1 release artifacts:
+Orders of magnitude, not benchmarks. What matters is that the window list is
+fast enough to fetch before the overlay opens, and that a capture stays well
+under half a second.
 
-| | Value | Build |
-| --- | --- | --- |
-| macOS app bundle | 6.9 MB | Intel, single arch |
-| dmg | 5.9 MB | universal |
-| `screenx.exe` | 9.8 MB | x64 |
-| Windows installer | 2.3 MB | x64 |
-
-The 3.0 MB dmg quoted before 0.2.1 was a single-architecture build. The release
-dmg is universal, which is where the rest comes from.
+Artifact sizes are deliberately not recorded here. They move with every release
+and with the build shape — a universal macOS binary is roughly twice a
+single-arch one — so a written figure is stale almost immediately. The release
+assets are the source of truth.
 
 ### Windows
 
@@ -601,13 +593,14 @@ source kept for behavioural comparison only.
 
 ## 15. History
 
-Version 0.1 was Electron. It worked, but the bundle was 281 MB, and the region
-tool could not highlight windows usefully: getting window positions needed a
-helper subprocess that took 518 ms per call, far too slow to run while the
-pointer moves.
+Version 0.1 was Electron. It worked, but the bundle ran to hundreds of
+megabytes, and the region tool could not highlight windows usefully: getting
+window positions needed a helper subprocess costing roughly half a second per
+call, far too slow to run while the pointer moves.
 
 Version 0.2 is this rewrite. `xcap` returns the same information in-process in
-0.6 ms, which is what makes hover-to-highlight possible at all. The Electron
+under a millisecond — three orders of magnitude — which is what makes
+hover-to-highlight possible at all. The Electron
 version is in the git history up to commit `d2db785`.
 
 GIF recording existed in 0.1 and is not in 0.2. It is paused, not abandoned.

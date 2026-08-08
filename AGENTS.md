@@ -19,7 +19,6 @@ selection overlay, the annotation editor and the settings form. Fully offline â€
 - Rust entry point: `src-tauri/src/lib.rs` â†’ `run()` at the bottom.
 - Pages: `ui/*.html` + matching `.js`. No framework, no bundler, no build step.
 - One JSON settings file. GIF recording is deliberately absent (parked).
-- 6.9 MB on macOS, 9.8 MB on Windows.
 - 23 Rust tests, 28 JS tests, 7 self-checks. All must stay green.
 
 ---

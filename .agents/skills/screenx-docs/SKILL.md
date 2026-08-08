@@ -45,8 +45,12 @@ Banned in the README: jargon, marketing words, "simply", "just", "leverage",
 "seamless", "robust", "powerful", em-dash asides, and any sentence a reader has
 to read twice.
 
-Numbers and units stay exact. Never soften a measured figure into "fast" or
-"small" — write the number.
+Numbers that describe *behaviour* stay exact: the default dwell is 400 ms, the
+minimum window side is 48 pixels, a token width of `{4}` pads to four digits.
+Those are contracts, and rounding them makes the document wrong.
+
+Numbers that describe *artifacts* do not belong in any document. See
+[Figures](#figures) below.
 
 ### Structure to keep
 
@@ -191,7 +195,7 @@ below has actually diverged at least once.
 | Fact | Lives in |
 | --- | --- |
 | What works on each platform, and what is unverified | `README.md` "What is not here yet"; `docs/TECHNICAL.md` platform sections; `AGENTS.md` "Platform notes" |
-| Bundle and installer sizes | `README.md` intro; `docs/TECHNICAL.md` "Sizes and timings"; `AGENTS.md` "Orientation" |
+| Anything a release produces | Nowhere. Do not write artifact sizes down — see [Figures](#figures) |
 | Test and self-check counts | `docs/TECHNICAL.md` section 13; `AGENTS.md` "Orientation" |
 | Version number | `package.json`; `src-tauri/Cargo.toml`; `src-tauri/Cargo.lock`; `src-tauri/tauri.conf.json`; installer filenames in `README.md` |
 | An invariant | `AGENTS.md` numbered list; `docs/TECHNICAL.md` "Things that will bite you" |
@@ -236,20 +240,27 @@ grep -oE 'docs/images/[a-z-]+\.png' README.md | sort -u | while read f; do
 done
 ```
 
-### Sizes
+### Figures
 
-Sizes are **decimal MB (10^6 bytes)**, matching Finder. `ls -l` and PowerShell's
-`/1MB` give binary MiB, which is 5% smaller and reads as a different number next
-to an existing figure — that mismatch has already shipped once.
+**Artifact sizes are not recorded in any document.** Not the app bundle, the
+dmg, the installer or the binary. They move with every release and with the
+build shape — a universal macOS binary is roughly twice a single-arch one — so a
+written figure is stale on arrival and generates busywork at each release. The
+release assets are the source of truth, and a reader who wants a byte count can
+look there. Do not link them to it either; it is not interesting enough to
+signpost.
 
-Always record which build a size came from. A universal macOS binary is roughly
-twice a single-arch one, so an unlabelled size silently becomes wrong the moment
-the release shape changes.
+"Small", "a few megabytes", "hundreds of megabytes" are fine. That is the whole
+claim worth making, and it stays true.
 
-```sh
-gh release view <tag> --json assets --jq '.assets[]|"\(.size)\t\(.name)"'
-stat -c '%s' src-tauri/target/release/screenx.exe
-```
+**Performance figures are approximate, and marked as approximate.** Write
+"~35 ms", "under a millisecond", "roughly half a second", "100–250 ms". Hard
+values like "0.6 ms" and "518 ms" read as benchmarks, which invites someone to
+either re-measure before touching a line of prose, or leave a stale number in
+place. Orders of magnitude are what the argument actually rests on.
+
+Behavioural constants are the exception and stay exact: a default of 400 ms, a
+48-pixel minimum. Those are contracts, not measurements.
 
 ### Claims about what works
 
@@ -262,7 +273,7 @@ without anyone noticing.
 
 ## Rules of thumb
 
-- Write the number, not an adjective.
+- Exact for behaviour, approximate for performance, absent for artifact sizes.
 - If a fix was subtle, the reason belongs in the docs *and* in a code comment.
 - An invariant in `AGENTS.md` must name a real bug.
 - Documentation that claims something works must point at how that was verified.
