@@ -34,9 +34,14 @@ jobs:
         with:
           targets: ${{ matrix.rust-targets }}
 
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      # No Rust cache here on purpose. This workflow only runs on tags, and an
+      # Actions cache is readable from the ref that wrote it, its children, and
+      # the default branch — so sibling tags never share one. Every release run
+      # logged "No cache found" against a byte-identical key and then spent
+      # 1m44s (Windows) uploading 480 MB nothing would read. If release builds
+      # need to get faster, warm a cache on master instead: add
+      # `push: branches: [master]` and guard the tauri-action step with
+      # `if: startsWith(github.ref, 'refs/tags/')`.
 
       - run: npm ci
 
