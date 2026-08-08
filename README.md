@@ -403,4 +403,4 @@ yet. Build it on Windows and report what breaks.
 
 ## Licence
 
-MIT
+GNU General Public License v3.0. See [`LICENSE`](LICENSE).
