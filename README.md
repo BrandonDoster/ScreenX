@@ -72,11 +72,8 @@ your PC** window the first time. To continue:
 
 You do this one time only.
 
-ScreenX needs the Microsoft Edge WebView2 Runtime. Windows 11 has it already,
-and so do most Windows 10 computers, because Microsoft Edge installs it.
-
-If the runtime is absent, the installer gets it for you. `screenx.exe` cannot do
-this. On a Windows 10 computer that has no runtime, use the installer.
+ScreenX needs Windows 11. It uses the Microsoft Edge WebView2 Runtime, which
+Windows 11 includes.
 
 ---
 

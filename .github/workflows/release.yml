@@ -56,10 +56,7 @@ jobs:
             Unsigned builds. macOS and Windows both warn on first launch.
 
             - macOS: `.dmg` (universal, Apple Silicon and Intel)
-            - Windows: `-setup.exe` installer, or `screenx.exe` to run portable
-
-            The portable build needs the Microsoft Edge WebView2 Runtime, which
-            Windows 11 already has. The installer fetches it if it is missing.
+            - Windows 11: `-setup.exe` installer, or `screenx.exe` to run portable
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
