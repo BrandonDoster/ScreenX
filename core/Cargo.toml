@@ -1,0 +1,28 @@
+[package]
+name = "screenx-core"
+version = "0.3.0"
+description = "Capture, filename patterns and settings. No UI, no windowing."
+license = "GPL-3.0-only"
+edition = "2021"
+rust-version = "1.77.2"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+chrono = "0.4"
+rand = "0.9"
+dirs = "6"
+arboard = "3"
+# Not used directly; it arrives through image -> tiff, and 0.5.15 does not
+# compile on rustc 1.97. Drop the pin when a stable 0.5.16 ships.
+zune-jpeg = "0.5.16-rc1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# xcap composites a window list, which loses the menu bar. See `display_image`.
+objc2-core-graphics = { version = "0.3", features = [
+    "CGDirectDisplay",
+    "CGImage",
+    "CGDataProvider",
+] }

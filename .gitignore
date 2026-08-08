@@ -9,4 +9,7 @@ out/
 
 # Rust / Tauri build output
 src-tauri/target/
+target/
+app/target/
+core/target/
 src-tauri/gen/
