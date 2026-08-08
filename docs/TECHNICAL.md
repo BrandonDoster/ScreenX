@@ -255,6 +255,9 @@ is worth writing if anyone reports drift.
 
 ## 6. The capture flows, step by step
 
+Both flows take `State.arming` first and hold it until the capture is on screen,
+and both start with `capture_delay()`. See section 11.
+
 ### Whole screen — `capture_fullscreen`
 
 1. A worker thread captures every monitor.
@@ -462,6 +465,55 @@ takes that key away from every application on the system.
 `register_hotkeys` returns the accelerators the system refused, and the settings
 page reports them after saving.
 
+### The handler must not touch the shortcut registry
+
+`tauri-plugin-global-shortcut` dispatches its callback like this:
+
+```rust
+if let Some(shortcut) = shortcuts_.lock().unwrap().get(&e.id) {
+    handler(&app_handle, &shortcut.shortcut, e);
+}
+```
+
+The `MutexGuard` is alive for the whole of the call. `std::sync::Mutex` is not
+reentrant, so anything inside the handler that reaches `register` or
+`unregister` blocks forever on a lock its own stack frame holds.
+
+That is exactly what Escape did. The handler called `region_cancelled`, which
+calls `close_overlays`, which calls `release_escape` to unregister Escape — from
+inside Escape's own handler. On macOS the Carbon hotkey callback runs on the
+main thread, so the deadlock took the event loop with it: the overlay froze on
+screen, and because ScreenX is an accessory app with no ordinary window, Force
+Quit had nothing to list.
+
+The handler now clones the `AppHandle` and the `Shortcut` and does the work on
+a spawned thread. That thread waits on the same mutex, but only until the
+callback returns. Nothing else in the handler may become synchronous again.
+
+### Capturing an open menu
+
+An open menu is a modal keyboard grab. On macOS the menu-tracking loop consumes
+key events before a Carbon hotkey sees them, so ScreenX is not called at all
+until the menu closes — which is why pressing the shortcut over an open menu
+looked like nothing happened, and the screenshot arrived the instant the menu
+was dismissed. Nothing in this application can override that.
+
+Even a hotkey that did arrive would not help region select: opening the overlay
+takes focus and dismisses the menu before the pixels are read.
+
+`capture_delay_ms` solves both at once. `capture_delay()` sleeps on the worker
+thread before `capture_monitors()`, so the order becomes press the shortcut,
+open the menu, wait, read the screen. The overlay opens afterwards over a frozen
+frame that already contains the menu, so dismissing it costs nothing. The
+default is 0 and the whole feature is one sleep.
+
+The delay opens a gap the old guard did not cover. `start_region_select` only
+checked `State.pending`, which is not filled until the capture completes; with a
+five-second delay a second press built a second set of overlays under the same
+window labels and replaced the shots the first set was displaying. `State.arming`
+is an `AtomicBool` taken at the hotkey and released by the `Arming` drop guard,
+so every error path clears it too.
+
 ---
 
 ## 12. Building and releasing
@@ -622,6 +674,11 @@ the main thread. See section 16.
 breaks saving in a way that looks like an operating system permission problem.
 
 **Do not reintroduce `CommandOrControl`.** See section 11.
+
+**Nothing in the global shortcut handler may register or unregister a
+shortcut.** The plugin holds a non-reentrant mutex across the callback, so it
+deadlocks the main thread and the app becomes unkillable from Force Quit. See
+section 11.
 
 **Do not replace `ui/blur.js` with `ctx.filter`.** See section 8.
 

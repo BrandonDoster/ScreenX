@@ -19,7 +19,7 @@ selection overlay, the annotation editor and the settings form. Fully offline �
 - Rust entry point: `src-tauri/src/lib.rs` → `run()` at the bottom.
 - Pages: `ui/*.html` + matching `.js`. No framework, no bundler, no build step.
 - One JSON settings file. GIF recording is deliberately absent (parked).
-- 23 Rust tests, 28 JS tests, 7 self-checks. All must stay green.
+- 23 Rust tests, 29 JS tests, 8 self-checks. All must stay green.
 
 ---
 
@@ -27,17 +27,17 @@ selection overlay, the annotation editor and the settings form. Fully offline �
 
 | File | Lines | Holds |
 | --- | ---: | --- |
-| `src-tauri/src/lib.rs` | 863 | State, tray, hotkeys, capture flows, window builders, all commands |
-| `src-tauri/src/capture.rs` | 411 | xcap wrappers, `Rect` maths, coordinate normalisation, encoding, saving |
+| `src-tauri/src/lib.rs` | 946 | State, tray, hotkeys, capture flows, window builders, all commands |
+| `src-tauri/src/capture.rs` | 464 | xcap wrappers, `Rect` maths, coordinate normalisation, encoding, saving |
 | `src-tauri/src/naming.rs` | 332 | Filename pattern expansion + its tests |
-| `src-tauri/src/settings.rs` | 204 | The single JSON settings file |
-| `src-tauri/src/selfcheck.rs` | 202 | Debug only. Diagnostics needing a real webview/screen |
+| `src-tauri/src/settings.rs` | 213 | The single JSON settings file |
+| `src-tauri/src/selfcheck.rs` | 280 | Debug only. Diagnostics needing a real webview/screen |
 | `src-tauri/src/docshots.rs` | 215 | Debug only. Generates `docs/images/*` |
-| `ui/editor.js` | 755 | Annotation editor |
+| `ui/editor.js` | 763 | Annotation editor |
 | `ui/overlay.js` | 350 | Selection overlay, one instance per monitor |
-| `ui/settings.js` | 310 | Settings form, hotkey recorder |
+| `ui/settings.js` | 312 | Settings form, hotkey recorder |
 | `ui/blur.js` | 76 | Blur, shared by editor and self-check |
-| `tests/*.mjs` | 624 | DOM stubs + behaviour tests for overlay and editor |
+| `tests/*.mjs` | 638 | DOM stubs + behaviour tests for overlay and editor |
 
 `reference/` holds third-party source for behavioural comparison. **Never
 compile it, never copy from it, never commit it.** It is gitignored.
@@ -48,16 +48,16 @@ compile it, never copy from it, never commit it.** It is gitignored.
 
 | Task | Go to |
 | --- | --- |
-| Add a command the UI can call | `lib.rs` — write `#[tauri::command]`, then add it to `invoke_handler!` (line 798). If it opens or closes a window, read invariant 11 first |
+| Add a command the UI can call | `lib.rs` — write `#[tauri::command]`, then add it to `invoke_handler!` (line 881). If it opens or closes a window, read invariant 11 first |
 | Add a setting | `settings.rs` `Settings` struct + its `Default`, then a control in `ui/settings.html`, then `fill()` and `collect()` in `ui/settings.js` |
 | Add a filename token | `naming.rs` — `TOKENS` array (line 30, **longest first**) and `expand()` (line 104), then the README table |
 | Add an editor tool | `ui/editor.js` — `TOOLS` array (line 21), a `case` in `drawShape()`, and `shapeBounds()` if the shape is not `x1,y1,x2,y2` |
-| Change how a window is opened | `lib.rs` — `open_settings` (108), `open_editor` (129), overlays inside `start_region_select` (286) |
-| Change what happens after a capture | `lib.rs` — `deliver()` (199) |
+| Change how a window is opened | `lib.rs` — `open_settings` (171), `open_editor` (192), overlays inside `start_region_select` (352) |
+| Change what happens after a capture | `lib.rs` — `deliver()` (262) |
 | Change region/window selection behaviour | `ui/overlay.js` — dwell logic near the top, `finish()` for the outcome |
-| Change the tray menu | `lib.rs` — `build_tray()` (492) |
-| Change hotkey recording | `ui/settings.js` — `toAccelerator()`; registration in `lib.rs` `register_hotkeys()` (459) |
-| Touch coordinates | `capture.rs` — `to_dip()` (86) and `crop_to_rect()` (201). Read invariant 1 first |
+| Change the tray menu | `lib.rs` — `build_tray()` (561) |
+| Change hotkey recording | `ui/settings.js` — `toAccelerator()`; registration in `lib.rs` `register_hotkeys()` (528) |
+| Touch coordinates | `capture.rs` — `to_dip()` (86) and `crop_to_rect()` (254). Read invariant 1 first |
 
 ---
 
@@ -97,7 +97,7 @@ As and Copy. It looks exactly like an OS permission problem and is not.
 remove the frame keyed to that window. Otherwise every capture leaks megabytes
 for the process lifetime.
 
-**7. Window creation belongs on the main thread.** Use `on_main()` (lib.rs 232).
+**7. Window creation belongs on the main thread.** Use `on_main()` (lib.rs 295).
 Capture itself can run anywhere. Note that `on_main` only defers when the caller
 is not already the main thread, so it does not stand alone — see invariant 11.
 
@@ -125,6 +125,43 @@ moves the body to the thread pool, after which `window.close()` and
 `run_on_main_thread` post to the event loop instead of running inline — note
 that `run_on_main_thread` executes the closure *immediately* when the caller is
 already the main thread, so it is not a defence on its own.
+
+**12. The global shortcut handler must not register or unregister a shortcut,
+and must do its work on a spawned thread.** `tauri-plugin-global-shortcut`
+dispatches the callback while holding its shortcut map's `std::sync::Mutex`, and
+that mutex is not reentrant. Escape's handler called `region_cancelled`, which
+unregisters Escape, so it deadlocked on the lock its own stack frame held — on
+the main thread, so the overlay froze on screen and Force Quit had nothing to
+list, ScreenX being an accessory app with no ordinary window. `with_handler`
+(lib.rs 825) now clones the `AppHandle` and the `Shortcut` and spawns.
+
+**13. A capture takes `State.arming` before it starts.** `State.pending` is not
+filled until the pixels are read, so it cannot guard the `capture_delay_ms`
+wait. Two presses during a five-second delay built two sets of overlays under
+the same window labels and the second capture replaced the shots the first set
+was showing. The `Arming` drop guard (lib.rs 81) releases it on every path,
+including the error returns.
+
+**14. macOS captures read the framebuffer, not a window list.** xcap's
+`Monitor::capture_image` calls `CGWindowListCreateImage`, which composites the
+windows it is handed. The menu bar background, the clock and every status item
+belong to WindowServer and SystemUIServer, do not come back through that list,
+and vanish from the screenshot while the menu titles stay — it looks like a
+capture permission fault and is not. `capture::display_image` (capture.rs 116)
+uses `CGDisplayCreateImage` instead. That is deprecated in favour of
+ScreenCaptureKit, so expect to port it eventually; xcap is still correct on
+Windows and stays there.
+
+**15. The overlay must activate the whole app, not just take focus.** ScreenX is
+an accessory app, so it sits outside the normal activation order: `set_focus`
+orders the overlay front but cannot make it *key*, and a window that is not key
+gets no mouse or keyboard events. It arrives dimmed, with an arrow cursor
+instead of the crosshair its CSS asks for, and the first click is spent
+activating rather than starting a selection. `activate_app` (lib.rs) calls
+`activateIgnoringOtherApps:` — the plain `activate()` is cooperative on macOS 14
+and later and the system defers it, which is the same bug with a delay in front
+of it. If this ever stops holding, the next lever is switching the activation
+policy to `Regular` while an overlay is up and back to `Accessory` on close.
 
 ---
 

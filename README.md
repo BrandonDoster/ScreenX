@@ -243,6 +243,21 @@ milliseconds. The default is 400.
 - Use 0 to highlight as soon as the pointer moves over a window.
 - Use a larger number if the highlight appears when you do not want it.
 
+**Wait this long after the shortcut before the capture** sets a delay in
+milliseconds. The default is 0, which reads the screen immediately.
+
+Use this setting to take a screenshot of an open menu. A menu closes as soon as
+you press a shortcut or as soon as the overlay opens, so a menu cannot be in a
+screenshot that you start while the menu is open.
+
+1. Set the delay to 5000.
+2. Press the shortcut.
+3. Open the menu.
+4. Wait. ScreenX reads the screen with the menu still shown.
+
+The delay applies to the whole screen and to the region overlay. The overlay
+shows you the picture that ScreenX already took, so the menu is in it.
+
 ### Hotkeys
 
 ![The Hotkeys tab of the ScreenX settings window](docs/images/settings-hotkeys.png)
@@ -395,6 +410,15 @@ smaller windows, because they are usually menu bar items and shadows.
 Another application has taken the same combination. Open the settings, go to
 **Hotkeys**, and choose a different combination. If the system refuses a
 combination, ScreenX tells you after you save.
+
+### My shortcut does nothing while a menu is open
+
+An open menu takes the keyboard from every other program, so ScreenX does not
+receive the shortcut until the menu closes. This is a rule of the operating
+system and ScreenX cannot change it.
+
+To take a screenshot of a menu, set a capture delay. Read
+[Capture](#capture) in the settings section.
 
 ### The overlay is on the screen and I cannot remove it
 
