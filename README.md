@@ -6,7 +6,8 @@ ScreenX is a screen capture tool for macOS and Windows. It keeps everything on
 your computer. It does not upload your screenshots, it does not need an account,
 and it contains no network code.
 
-The application is 6.9 MB on macOS. The Windows build is not measured yet.
+The application is 6.9 MB on macOS and 9.3 MB on Windows. The Windows installer
+is 2.2 MB to download.
 
 ---
 
@@ -419,4 +420,10 @@ see.
 
 ## Licence
 
-GNU General Public License v3.0. See [`LICENSE`](LICENSE).
+ScreenX: local screen capture and annotation.
+Copyright © 2026 Brandon Doster.
+
+ScreenX is free software. You can share it and change it under the terms of the
+GNU General Public License, version 3. See [`LICENSE`](LICENSE).
+
+ScreenX has no warranty.
