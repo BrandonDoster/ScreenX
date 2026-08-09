@@ -12,6 +12,7 @@
 //! is not optional: the app is persistent and the overlay is a state it enters.
 
 mod overlay;
+mod tray;
 
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -21,10 +22,7 @@ use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager,
 };
 use screenx_core::{capture, settings};
-use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
-    TrayIconBuilder,
-};
+use tray_icon::{menu::MenuEvent, TrayIconEvent};
 
 use overlay::{Outcome, Overlay};
 
@@ -348,8 +346,9 @@ fn main() -> eframe::Result<()> {
         }
     });
 
-    listen_for_hotkeys(sender.clone(), region_hotkey);
-    let _tray = build_tray(sender);
+    listen_for_events(sender.clone(), region_hotkey);
+    // Held for the life of the process: dropping it removes the icon.
+    let _tray = tray::build();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -370,7 +369,7 @@ fn main() -> eframe::Result<()> {
 }
 
 /// Forward hotkey and tray menu events onto the app's channel.
-fn listen_for_hotkeys(sender: Sender<Request>, region: Option<u32>) {
+fn listen_for_events(sender: Sender<Request>, region: Option<u32>) {
     let hotkeys = GlobalHotKeyEvent::receiver().clone();
     let menu = MenuEvent::receiver().clone();
     std::thread::spawn(move || loop {
@@ -380,50 +379,21 @@ fn listen_for_hotkeys(sender: Sender<Request>, region: Option<u32>) {
             }
         }
         if let Ok(event) = menu.try_recv() {
-            let request = match event.id.as_ref() {
-                "region" => Some(Request::Region { delayed: false }),
-                "fullscreen" => Some(Request::Fullscreen { delayed: false }),
-                "region-delayed" => Some(Request::Region { delayed: true }),
-                "fullscreen-delayed" => Some(Request::Fullscreen { delayed: true }),
-                "quit" => Some(Request::Quit),
-                _ => None,
-            };
-            if let Some(request) = request {
-                let _ = sender.send(request);
+            match event.id.as_ref() {
+                "folder" => tray::open_path(&tray::screenshot_folder()),
+                "settings" => tray::open_settings(),
+                "quit" => {
+                    let _ = sender.send(Request::Quit);
+                }
+                _ => {}
             }
+        }
+        // Windows users expect a tray icon to open something on double click,
+        // and the folder is the only thing worth opening. macOS shows the menu
+        // on any click, so this never fires there.
+        if let Ok(TrayIconEvent::DoubleClick { .. }) = TrayIconEvent::receiver().try_recv() {
+            tray::open_path(&tray::screenshot_folder());
         }
         std::thread::sleep(std::time::Duration::from_millis(30));
     });
-}
-
-fn build_tray(_sender: Sender<Request>) -> Option<tray_icon::TrayIcon> {
-    let menu = Menu::new();
-    let region = MenuItem::with_id("region", "Capture Region", true, None);
-    let fullscreen = MenuItem::with_id("fullscreen", "Capture Entire Screen", true, None);
-    // The delay is what makes photographing a menu possible, so it stays
-    // reachable — just not charged to every capture.
-    let region_delayed =
-        MenuItem::with_id("region-delayed", "Capture Region After Delay", true, None);
-    let fullscreen_delayed = MenuItem::with_id(
-        "fullscreen-delayed",
-        "Capture Entire Screen After Delay",
-        true,
-        None,
-    );
-    let quit = MenuItem::with_id("quit", "Quit ScreenX", true, None);
-    menu.append_items(&[
-        &region,
-        &fullscreen,
-        &region_delayed,
-        &fullscreen_delayed,
-        &PredefinedMenuItem::separator(),
-        &quit,
-    ])
-    .ok()?;
-
-    TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_tooltip("ScreenX")
-        .build()
-        .ok()
 }
