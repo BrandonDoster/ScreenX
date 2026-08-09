@@ -6,8 +6,8 @@ ScreenX is a screen capture tool for macOS and Windows. It keeps everything on
 your computer. It does not upload your screenshots, it does not need an account,
 and it contains no network code.
 
-The application is small. It uses the web view that comes with your operating
-system, so it does not contain a browser.
+The application is small. It draws its own window, so it does not contain a
+browser.
 
 ---
 
@@ -27,11 +27,12 @@ system, so it does not contain a browser.
 
 ## Install
 
-> **This version is not released yet.** ScreenX has been rewritten and does not
-> use a web browser engine any more. There is no installer for this version. To
-> use it, build it — see [For developers](#for-developers).
+> **This version is a release candidate.** ScreenX has been rewritten. It does
+> not use a web browser engine any more. There is no installer for it yet. To
+> use it, build it. See [For developers](#for-developers).
 >
-> The instructions below are for the released version, 0.2.1.
+> The instructions below install version 0.3.0. That is the last version with an
+> installer, and it is the older build.
 
 ### macOS
 
@@ -83,13 +84,7 @@ ScreenX puts an icon in the menu bar (macOS) or the notification area
 (Windows). It has no main window. You use it from that icon or with a keyboard
 shortcut.
 
-> **PLACEHOLDER — screenshot: `docs/images/tray-menu.png`**
-> The menu bar icon with its menu open. The menu shows "Open Screenshots
-> Folder", "Settings..." and "Quit ScreenX".
->
-> I did not make this screenshot, because the menu is drawn by the operating
-> system and must show a real menu bar. Take it yourself when your screen shows
-> nothing private.
+![Tray Menu Icon](docs/images/tray-menu.png)
 
 ScreenX writes a settings file with the default values the first time you start
 it. Open it from the menu bar icon to change where your screenshots go.
@@ -119,12 +114,7 @@ Press **Ctrl + Alt + A**. The screen freezes and becomes dark.
 Hold the mouse button down, drag, then let go. ScreenX shows the size of your
 rectangle while you drag.
 
-> **PLACEHOLDER — screenshot: `docs/images/overlay.png`**
-> The selection overlay: the screen dark, with one bright rectangle inside a
-> blue outline and its size shown above it.
->
-> I did not make this screenshot, because it must show a real desktop. Take it
-> yourself when your screen shows nothing private.
+![Region Select Overlay](docs/images/overlay.png)
 
 ScreenX keeps the picture that it took when you pressed the shortcut. Your
 screen can change while the overlay is open. The screenshot does not.
@@ -145,12 +135,7 @@ menu bar icon while the overlay is open.
 The editor opens after each capture. Set `afterCapture` in the settings file to
 change this.
 
-> **PLACEHOLDER — screenshot: `docs/images/editor.png`**
-> The ScreenX editor, showing a blur, a red box, an orange arrow, a yellow
-> highlight, a step number and a text label on an example window.
->
-> The picture that was here showed the previous editor, which no longer exists.
-> Take a new one when your screen shows nothing private.
+![Inline Editor](docs/images/editor.png)
 
 ### The tools
 
@@ -341,8 +326,6 @@ Put a number in braces after the token.
 - If you make a mistake in a token, the token stays in the name. This shows you
   the mistake.
 
-The **Naming** tab shows an example of your pattern while you type it.
-
 ---
 
 ## Keyboard shortcuts
@@ -410,8 +393,8 @@ Press **Esc**. ScreenX holds the Esc key for as long as the overlay is open.
 
 ### The editor is slow with a very large image
 
-Click the **Fit** button to change the zoom. This does not change the saved
-image.
+Click the percentage in the toolbar. ScreenX fits the image to the window. This
+does not change the saved image.
 
 ---
 
