@@ -396,8 +396,12 @@ ordering and file-cache effects cancel:
 | Split | 1.2 MB | 267 ms |
 
 So the trade is about 41 MB of permanently resident memory against about 110 ms
-on every screenshot. The first capture after a cold start is worse — roughly
-1.2 s — because the worker and its renderer are not in the file cache yet.
+on every screenshot.
+
+A cold first capture measured about 1.2 s once, taken immediately after a build.
+It is one sample, it does not match how the program feels in use, and it is
+recorded here only so nobody repeats it as fact. Measure it after a reboot
+before believing it.
 
 The worker reads the screen **before it creates any window**. On this shape that
 is a correctness rule rather than an optimisation: anything the worker draws
@@ -436,7 +440,7 @@ single process.
 
 ## 14. Tests
 
-Two `cargo test` suites: 23 in `core/`, and 21 in `app/` — 18 for the capture
+Two `cargo test` suites: 23 in `core/`, and 25 in `app/` — 22 for the capture
 worker and 3 for the listener.
 
 `core/` covers filename patterns, settings round-trips, rectangle maths,

@@ -20,7 +20,7 @@ egui interface**. There is no webview, no HTML and no JavaScript. Fully offline
   tray, shortcuts, settings, and no renderer at all. `screenx-capture`
   (`app/src/main.rs`) is spawned per screenshot and exits when the editor
   closes. Read "The split" below before assuming either is the whole app.
-- 23 core tests, 18 capture tests, 3 listener tests. All must stay green.
+- 23 core tests, 22 capture tests, 3 listener tests. All must stay green.
 - `src-tauri/` and `ui/` are the **previous webview build**, kept only until the
   native one has been used for a while. Do not add to them.
 
@@ -30,9 +30,11 @@ A GL context is not freed by anything short of process exit, so a program that
 holds one idles at the cost of one whether or not it is drawing. Measured on
 Windows: the single-process build idled at 42.9 MB and the listener idles at
 1.2 MB. The price is paid per screenshot, in spawn and renderer start-up —
-median 159 ms to the overlay before, 267 ms after, both warm. The first capture
-after a cold start is worse, around 1.2 s, because nothing is in the file cache
-yet.
+median 159 ms to the overlay before, 267 ms after, both warm.
+
+One cold first capture measured about 1.2 s, immediately after a build. That
+figure is a single sample and does not match how it feels in use, so treat it as
+unmeasured rather than as a number: re-measure after a reboot before quoting it.
 
 `screenx-capture` reads the screen **before it creates any window**. That is not
 a speed trick, it is the reason the overlay is not in its own photograph.

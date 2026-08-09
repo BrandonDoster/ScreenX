@@ -47,6 +47,9 @@ struct App {
     /// Where the editor was last dragged to. Read from the settings file rather
     /// than from memory, because the previous editor was a different process.
     editor_pos: Option<egui::Pos2>,
+    /// Read once at start-up. Held rather than re-read so the tests can choose
+    /// it without depending on whatever is in the user's settings file.
+    after_capture: String,
 }
 
 impl App {
@@ -61,14 +64,11 @@ impl App {
             ctx.request_repaint();
         });
 
-        let editor_pos = settings::get()
-            .editor_position
-            .map(|[x, y]| egui::pos2(x, y));
-        let mut app = Self {
-            mode: Mode::Idle,
-            status: None,
-            editor_pos,
-        };
+        let configured = settings::get();
+        let mut app = Self::waiting(
+            configured.editor_position.map(|[x, y]| egui::pos2(x, y)),
+            configured.after_capture,
+        );
         match start {
             Start::Region(shot) => app.begin_region(&cc.egui_ctx, shot),
             Start::Fullscreen(shot) => {
@@ -77,6 +77,15 @@ impl App {
             }
         }
         app
+    }
+
+    fn waiting(editor_pos: Option<egui::Pos2>, after_capture: String) -> Self {
+        Self {
+            mode: Mode::Idle,
+            status: None,
+            editor_pos,
+            after_capture,
+        }
     }
 
     /// Wait before reading the screen, when asked to.
@@ -114,28 +123,34 @@ impl App {
     }
 
     /// Leave the overlay and give the capture back.
+    ///
+    /// Every path out of here either hands the work to `deliver` or ends the
+    /// process, and it must not do both: `go_idle` used to park the window and
+    /// now closes it, so calling it before delivering queued a close that fired
+    /// at the end of the same frame and shut the editor as it opened.
     fn end_selection(&mut self, ctx: &egui::Context, outcome: Outcome) {
         let previous = std::mem::replace(&mut self.mode, Mode::Idle);
-        self.go_idle(ctx);
 
-        let Mode::Selecting(overlay) = previous else {
-            return;
-        };
-        let Outcome::Selected(rect) = outcome else {
-            return;
+        let (Mode::Selecting(overlay), Outcome::Selected(rect)) = (previous, outcome) else {
+            // Cancelled, so there is nothing left for this process to do.
+            return self.go_idle(ctx);
         };
 
         let Some(image) = capture::crop_to_rect(overlay.shot(), &rect) else {
-            return self.report("that selection was too small to capture".into());
+            self.report("that selection was too small to capture".into());
+            return self.go_idle(ctx);
         };
         let density = overlay.shot().scale;
         self.deliver(ctx, image, overlay.shot().name.clone(), density);
     }
 
     /// What happens to a finished capture, per the settings file.
+    ///
+    /// Only the editor keeps this process alive. The other two write the
+    /// screenshot somewhere and then there is nothing left to stay open for.
     fn deliver(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String, density: f32) {
-        match settings::get().after_capture.as_str() {
-            "editor" => self.open_editor(ctx, image, title, density),
+        match self.after_capture.as_str() {
+            "editor" => return self.open_editor(ctx, image, title, density),
             "clipboard" => self.report(match capture::copy_to_clipboard(&image) {
                 Ok(()) => "copied".into(),
                 Err(err) => err,
@@ -148,6 +163,7 @@ impl App {
                 Err(err) => self.report(err),
             },
         }
+        self.go_idle(ctx);
     }
 
     fn open_editor(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String, density: f32) {
@@ -677,6 +693,83 @@ mod tests {
             capture::Rect { x: 0, y: 0, width: 5120, height: 1440 },
             capture::Rect { x: 1680, y: 1440, width: 1920, height: 1080 },
         ]
+    }
+
+    fn shot(width: u32, height: u32) -> capture::MonitorShot {
+        capture::MonitorShot {
+            id: 0,
+            bounds: capture::Rect { x: 0, y: 0, width, height },
+            scale: 1.0,
+            name: "test".into(),
+            image: image::RgbaImage::from_pixel(width, height, image::Rgba([9, 9, 9, 255])),
+        }
+    }
+
+    /// Run one frame and report what the app asked the window to do.
+    fn commands_from(app: &mut App, run: impl FnOnce(&mut App, &egui::Context)) -> Vec<egui::ViewportCommand> {
+        let ctx = egui::Context::default();
+        // `run` takes an `FnMut`, so the one-shot closure needs somewhere to be
+        // taken from.
+        let mut once = Some(run);
+        let output = ctx.run(Default::default(), |ctx| {
+            if let Some(run) = once.take() {
+                run(app, ctx);
+            }
+        });
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .clone()
+    }
+
+    #[test]
+    fn choosing_a_region_opens_the_editor_rather_than_closing() {
+        // The regression: `go_idle` used to park the window and now closes it,
+        // so calling it on the way to the editor queued a close that fired at
+        // the end of the same frame. The editor appeared and vanished. The mode
+        // is `Editing` either way, so only the queued command shows it.
+        let mut app = App::waiting(None, "editor".into());
+        let commands = commands_from(&mut app, |app, ctx| {
+            app.mode = Mode::Selecting(Overlay::new(ctx, shot(200, 200)));
+            app.end_selection(ctx, Outcome::Selected(capture::Rect { x: 0, y: 0, width: 80, height: 60 }));
+        });
+        assert!(matches!(app.mode, Mode::Editing(_)), "the editor should be open");
+        assert!(
+            !commands.contains(&egui::ViewportCommand::Close),
+            "the editor was opened and closed in the same frame: {commands:?}"
+        );
+    }
+
+    #[test]
+    fn cancelling_the_overlay_ends_the_process() {
+        let mut app = App::waiting(None, "editor".into());
+        let commands = commands_from(&mut app, |app, ctx| {
+            app.mode = Mode::Selecting(Overlay::new(ctx, shot(200, 200)));
+            app.end_selection(ctx, Outcome::Cancelled);
+        });
+        assert!(commands.contains(&egui::ViewportCommand::Close), "nothing left to do, so it must close");
+    }
+
+    #[test]
+    fn a_selection_that_is_only_saved_ends_the_process() {
+        // No editor means nothing to stay open for. This path had no close at
+        // all when the editor stopped being the only outcome.
+        let mut app = App::waiting(None, "clipboard".into());
+        let commands = commands_from(&mut app, |app, ctx| {
+            app.mode = Mode::Selecting(Overlay::new(ctx, shot(200, 200)));
+            app.end_selection(ctx, Outcome::Selected(capture::Rect { x: 0, y: 0, width: 80, height: 60 }));
+        });
+        assert!(commands.contains(&egui::ViewportCommand::Close), "a copy is finished work: {commands:?}");
+    }
+
+    #[test]
+    fn a_selection_too_small_to_crop_ends_the_process() {
+        let mut app = App::waiting(None, "editor".into());
+        let commands = commands_from(&mut app, |app, ctx| {
+            app.mode = Mode::Selecting(Overlay::new(ctx, shot(200, 200)));
+            // Entirely off the right edge, so nothing can be cropped from it.
+            app.end_selection(ctx, Outcome::Selected(capture::Rect { x: 400, y: 0, width: 10, height: 10 }));
+        });
+        assert!(commands.contains(&egui::ViewportCommand::Close));
     }
 
     #[test]
