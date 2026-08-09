@@ -70,20 +70,25 @@ one has seen enough use, then they go.
 
 ## 3. One window, three modes
 
-The whole program is one process, one event loop and one window.
+There are two programs. `screenx` stays running and draws nothing at all;
+`screenx-capture` is spawned per screenshot, owns the one window, and exits when
+the editor closes. See [Splitting the process](#splitting-the-process) in
+section 13 for why, and for what it costs.
 
-That is not a preference. A winit event loop can only be run once per process on
-macOS, so `eframe::run_native` cannot be called per capture. The app is
-persistent and the window is a state it moves through:
+Inside the worker there is one event loop and one window, which is not a
+preference: a winit event loop can only be run once per process on macOS, so
+`eframe::run_native` cannot be called twice. The window is a state the worker
+moves through, once:
 
 ```
-Idle ──hotkey──▶ Selecting ──drag──▶ Editing ──save/close──▶ Idle
- ▲                    │                                          │
- └────────── Esc ─────┴──────────────────────────────────────────┘
+spawn ──▶ Selecting ──drag──▶ Editing ──save/close──▶ exit
+              │                                         ▲
+              └──────────── Esc ────────────────────────┘
 ```
 
-`Mode` in `main.rs` holds exactly one of those. The window is hidden in `Idle`,
-covers the screen in `Selecting`, and is an ordinary titled window in `Editing`.
+`Mode` in `main.rs` holds exactly one of those. The window covers the screen in
+`Selecting` and is an ordinary titled window in `Editing`. `Idle` now means only
+that the work is finished and the process is on its way out.
 
 This is the shape the webview build spent a long session trying to reach by
 pre-warming its overlay, because standing up a WKWebView per capture was the
@@ -91,15 +96,17 @@ largest single cost in getting the overlay on screen. Here it is free: showing a
 window that already exists costs nothing, and the only per-capture work is
 uploading one texture.
 
-Two consequences worth knowing:
+Both of the awkward consequences this shape used to have were paid for by the
+single-process build and are now gone, which is worth recording because they
+return with any merge.
 
-**The close button must not quit.** There is one viewport, so its close request
-ends the process. ScreenX lives in the menu bar, so the request is cancelled and
-the mode goes back to `Idle`.
+**The close button had to be cancelled.** One viewport meant the editor's close
+request ended the process and took the menu bar icon with it. Now it ends only
+the worker.
 
-**Going idle shrinks the window.** A hidden window keeps a framebuffer the size
-it was last shown at. An editor left at full screen size would hold that for as
-long as the program ran.
+**Going idle had to shrink the window.** A hidden window keeps a framebuffer the
+size it was last shown at, so an editor left at full screen size held it for as
+long as the program ran. The worker has no idle state to shrink into.
 
 ---
 
@@ -373,6 +380,38 @@ selection fell through to `DefWindowProcW`. Quit, Open Screenshots Folder and
 Settings had never worked on Windows, and the only way to stop the program was
 Task Manager. 0.24 installs the subclass. That is the minimum version.
 
+### Splitting the process
+
+The idle cost below is a GL context, and nothing frees a GL context short of
+process exit. So the program was split in two: `screenx` holds the tray, the
+shortcuts and the settings and links no renderer at all, and `screenx-capture`
+is spawned for one screenshot and exits when the editor closes.
+
+Measured on the same machine, alternating between the two builds so that
+ordering and file-cache effects cancel:
+
+| | idle | overlay, warm |
+| --- | ---: | ---: |
+| One process | 42.9 MB | 159 ms |
+| Split | 1.2 MB | 267 ms |
+
+So the trade is about 41 MB of permanently resident memory against about 110 ms
+on every screenshot. The first capture after a cold start is worse — roughly
+1.2 s — because the worker and its renderer are not in the file cache yet.
+
+The worker reads the screen **before it creates any window**. On this shape that
+is a correctness rule rather than an optimisation: anything the worker draws
+would otherwise appear in its own photograph. The alternative — having the
+listener capture and hand the image over — keeps the freeze instant but puts
+full-screen pixel buffers back in the process that is supposed to stay small,
+which is the thing the split exists to avoid.
+
+Two pieces of state had to move out of memory and into the settings file,
+because the process that held them no longer outlives one screenshot: where the
+editor window was last left, and the auto-increment counter, which was already
+there. A second overlay is prevented by the listener holding the child handle
+rather than by a `Mode`, since the state now lives in another process.
+
 ### Idle memory on Windows
 
 Private working set starts around 42 MB, rises while the overlay is up, and
@@ -397,7 +436,8 @@ single process.
 
 ## 14. Tests
 
-Two `cargo test` suites: 23 in `core/`, 18 in `app/`.
+Two `cargo test` suites: 23 in `core/`, and 21 in `app/` — 18 for the capture
+worker and 3 for the listener.
 
 `core/` covers filename patterns, settings round-trips, rectangle maths,
 clipping, cropping, scale normalisation and encoding.

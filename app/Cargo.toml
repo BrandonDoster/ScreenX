@@ -6,6 +6,18 @@ license = "GPL-3.0-only"
 edition = "2021"
 rust-version = "1.77.2"
 
+# Two programs. `screenx` is what the user runs and what stays running: tray,
+# shortcuts, settings, no renderer. `screenx-capture` is spawned per screenshot
+# and exits when the editor closes, which is the only way the GL context's
+# memory is ever given back.
+[[bin]]
+name = "screenx"
+path = "src/listener.rs"
+
+[[bin]]
+name = "screenx-capture"
+path = "src/main.rs"
+
 [dependencies]
 screenx-core = { path = "../core" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
@@ -26,6 +38,10 @@ egui = "0.29"
 # `attach_menu_subclass_for_hwnd`, which is what routes the click.
 tray-icon = "0.24"
 global-hotkey = "0.6"
+# The listener's event loop. It creates no window, so no renderer comes with it
+# — that is the difference between a 42 MB idle and a 2 MB one. Already in the
+# tree under eframe, so this costs no extra compilation.
+winit = "0.30"
 # Glyph outlines for text drawn into the saved image. The geometry is a few
 # dozen lines here rather than a rasterisation crate, and the font is the one
 # egui already embeds.

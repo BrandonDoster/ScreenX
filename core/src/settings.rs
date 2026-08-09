@@ -69,6 +69,12 @@ pub struct Settings {
     /// milliseconds. 0 captures at once. This is the only way to capture an
     /// open menu; see `capture_delay` in lib.rs.
     pub capture_delay_ms: u64,
+    /// Where the editor window was last left, in points.
+    ///
+    /// This lives on disk rather than in memory because the editor is its own
+    /// process and does not outlive one screenshot. Nothing else in the file is
+    /// window state; it is here because there is nowhere else for it to go.
+    pub editor_position: Option<[f32; 2]>,
     pub features: Features,
     pub hotkeys: Hotkeys,
 }
@@ -86,6 +92,7 @@ impl Default for Settings {
             auto_increment_number: 0,
             window_highlight_delay_ms: 400,
             capture_delay_ms: 0,
+            editor_position: None,
             features: Features::default(),
             hotkeys: Hotkeys::default(),
         }
@@ -129,6 +136,19 @@ pub fn set(next: Settings) -> Settings {
     drop(guard);
     write(&snapshot);
     snapshot
+}
+
+/// Remember where the editor was left, without disturbing anything else.
+///
+/// Read-modify-write of the whole file, like `advance_counter`. The editor
+/// process writes this as it exits while the listener may be reading it, so it
+/// must not clobber a setting the user changed in between.
+pub fn remember_editor_position(position: [f32; 2]) {
+    let mut guard = store().lock().unwrap();
+    guard.editor_position = Some(position);
+    let snapshot = guard.clone();
+    drop(guard);
+    write(&snapshot);
 }
 
 /// Bump the counter used by `%i` without disturbing anything else.

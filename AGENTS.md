@@ -16,12 +16,26 @@ egui interface**. There is no webview, no HTML and no JavaScript. Fully offline
 — **there is no network code anywhere, and none may be added.**
 
 - Two crates. `core/` reads the screen and writes files; `app/` draws.
-- `app/src/main.rs` → `main()` at the bottom. One process, one event loop, one
-  window. It is hidden between captures on macOS and *parked* on Windows, which
-  is not the same thing — read invariant 14 before touching it.
-- 23 core tests, 18 app tests. All must stay green.
+- **Two programs.** `screenx` (`app/src/listener.rs`) is what stays running:
+  tray, shortcuts, settings, and no renderer at all. `screenx-capture`
+  (`app/src/main.rs`) is spawned per screenshot and exits when the editor
+  closes. Read "The split" below before assuming either is the whole app.
+- 23 core tests, 18 capture tests, 3 listener tests. All must stay green.
 - `src-tauri/` and `ui/` are the **previous webview build**, kept only until the
   native one has been used for a while. Do not add to them.
+
+### The split
+
+A GL context is not freed by anything short of process exit, so a program that
+holds one idles at the cost of one whether or not it is drawing. Measured on
+Windows: the single-process build idled at 42.9 MB and the listener idles at
+1.2 MB. The price is paid per screenshot, in spawn and renderer start-up —
+median 159 ms to the overlay before, 267 ms after, both warm. The first capture
+after a cold start is worse, around 1.2 s, because nothing is in the file cache
+yet.
+
+`screenx-capture` reads the screen **before it creates any window**. That is not
+a speed trick, it is the reason the overlay is not in its own photograph.
 
 ### Why it was rewritten
 
@@ -37,7 +51,8 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | File | Lines | Holds |
 | --- | ---: | --- |
 | `app/src/editor.rs` | 669 | Editor state, tools, history, toolbar, canvas input |
-| `app/src/main.rs` | 889 | App state machine, tray and hotkey wiring, window lifecycle, Windows taskbar |
+| `app/src/main.rs` | 723 | `screenx-capture`: one screenshot's overlay, editor and window lifecycle, then exit |
+| `app/src/listener.rs` | 247 | `screenx`: tray, shortcuts, and spawning the worker. No renderer |
 | `app/src/render.rs` | 366 | Shapes drawn twice: onto the saved image, and on screen |
 | `app/src/edits.rs` | 227 | Crop, cut out, blur, pixelate — the edits that rewrite pixels |
 | `app/src/overlay.rs` | 207 | Selection overlay |
@@ -45,7 +60,7 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | `app/build.rs` | 20 | Links the Windows icon resource. Windows host only |
 | `core/src/capture.rs` | 528 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
 | `core/src/naming.rs` | 332 | Filename pattern expansion + its tests |
-| `core/src/settings.rs` | 217 | The single JSON settings file |
+| `core/src/settings.rs` | 237 | The single JSON settings file |
 
 `reference/` holds third-party source for behavioural comparison. **Never
 compile it, never copy from it, never commit it.** It is gitignored.
@@ -60,16 +75,17 @@ compile it, never copy from it, never commit it.** It is gitignored.
 | Add a filename token | `core/src/naming.rs` — `TOKENS` array (**longest first**) and `expand()`, then the README table |
 | Add an editor tool | `app/src/editor.rs` — `Tool` enum (39) and `Tool::ALL` (61), a case in the drag or click handler in `ui()` (437), then **both** functions in `render.rs`. Read invariant 5 |
 | Add a shape | `app/src/editor.rs` `Shape` (79), then `draw_shapes_into` (render.rs 215) **and** `draw_on_screen` (render.rs 268) |
-| Change what happens after a capture | `app/src/main.rs` — `deliver()` (175) |
+| Change what happens after a capture | `app/src/main.rs` — `deliver()` (136) |
 | Change region selection behaviour | `app/src/overlay.rs` — `update()` |
-| Change the tray menu | `app/src/tray.rs` — `build()` (66). Read invariant 17 |
-| Change hotkey parsing | `app/src/main.rs` — `parse_hotkey()` (596). Read invariant 3 |
-| Show or hide the window | `app/src/main.rs` — `open_editor` (192), `begin_region` (134), `go_idle` (232), `park` (503/523). Read invariants 6, 7, 14 and 15 |
-| Change the Windows taskbar button | `app/src/main.rs` — `mod taskbar` (327). Read invariant 16 |
-| Move the editor window | `app/src/main.rs` — `editor_position()` (466) |
+| Change the tray menu | `app/src/tray.rs` — `build()` (66), then the `MenuEvent` arms in `listener.rs` `poll()` (85). Read invariant 17 |
+| Change hotkey parsing | `app/src/listener.rs` — `parse_hotkey()` (151). Read invariant 3 |
+| Start or stop a screenshot | `app/src/listener.rs` — `spawn()` (58) |
+| Show or hide the window | `app/src/main.rs` — `open_editor` (153), `begin_region` (96), `go_idle` (192). Read invariants 6, 14 and 15 |
+| Change the Windows taskbar button | `app/src/main.rs` — `mod taskbar` (252). Read invariant 16 |
+| Move the editor window | `app/src/main.rs` — `editor_position()` (391) |
 | Read the screen | `core/src/capture.rs` — `capture_primary()` (208). `capture_monitors()` (218) reads every display and is only for the old webview build |
 | Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (297). Read invariant 1 |
-| Measure memory | `app/src/main.rs` — `memcheck()` (634) |
+| Measure memory | `app/src/main.rs` — `memcheck()` (483) |
 
 ---
 
@@ -108,17 +124,19 @@ Reading pixels back off the GPU would avoid the duplication but is slow and
 fails outright on some drivers. A shape added to one and not the other makes the
 editor lie about the result.
 
-**6. The window's close button must not be allowed to quit.** There is one
-viewport, so its close request ends the process — and ScreenX lives in the menu
-bar, where quitting on close means the tray icon disappears the first time
-someone dismisses the editor. `update()` cancels the close and goes idle
-instead.
+**6. Closing the editor must not take the tray with it.** In the single-process
+build the editor's close request ended the process, so the tray icon vanished
+the first time anyone dismissed an editor, and the close had to be cancelled.
+The split satisfies this by construction — the editor's close ends
+`screenx-capture`, and the tray belongs to `screenx`, which is a different
+program. If the two are ever merged back, the cancel comes back with them.
 
-**7. Going idle has to shrink the window, not just hide it.** A hidden window
-keeps a framebuffer the size it was last shown at, so an editor left at full
-screen size holds that for as long as the app runs. `go_idle` also calls
-`forget_all_images`, because dropping a texture handle only queues the release.
-On Windows it must not actually hide — see invariant 14.
+**7. ~~Going idle has to shrink the window~~ — retired by the split.** A hidden
+window kept a framebuffer the size it was last shown at, so an editor left at
+full screen size held it for as long as the app ran. `screenx-capture` has no
+idle state: it exits. Reinstate this the moment anything makes the worker
+persist, along with `forget_all_images`, because dropping a texture handle only
+queues the release.
 
 **8. A capture is in physical pixels and egui lays out in points.** The density
 travels with the image into the editor, which divides by it. Drawing one for one
@@ -149,15 +167,20 @@ arrives dimmed, with an arrow cursor, and its first click is spent activating.
 `raise_and_activate` uses `activateIgnoringOtherApps:` because the modern
 `activate()` is cooperative on macOS 14 and later and the system defers it.
 
-**14. On Windows the window is parked, never hidden.** Windows does not paint a
-window it considers hidden, winit emits no `RedrawRequested` for an unpainted
-window, and `eframe::App::update` only runs on a redraw — so hiding the window
-stopped the app draining its own request channel. The hotkey still fired and the
-system still delivered it, with nothing left listening: it worked exactly once
-per launch, until the first capture finished and put the window away. `park()`
-keeps it visible at one point square, click-through, in the corner of the
-primary display. `ViewportBuilder::with_visible(false)` does not hold on Windows
-either, which is why `update` applies the idle state on its first frame.
+**14. On Windows an egui window must never be hidden and then expected to run.**
+Windows does not paint a window it considers hidden, winit emits no
+`RedrawRequested` for an unpainted window, and `eframe::App::update` only runs
+on a redraw — so hiding the window stopped the app draining its own request
+channel. The hotkey still fired and the system still delivered it, with nothing
+left listening: it worked exactly once per launch, until the first capture
+finished and put the window away.
+
+The single-process build worked around this by *parking* the window: visible,
+one point square, click-through, in a corner. The split removes the need — the
+worker never idles, and the listener has no window at all — but the rule stands
+for anything that reintroduces a hidden-but-live window.
+`ViewportBuilder::with_visible(false)` also does not hold on Windows, which is
+why the first frame sets the geometry rather than trusting the builder.
 
 **15. `ViewportCommand::Focus` goes last.** winit applies a window level change
 as an asynchronous `SetWindowPos` carrying `SWP_NOACTIVATE`. Sent after a focus
@@ -180,7 +203,10 @@ selection reached `DefWindowProcW` and was dropped. The whole tray menu was
 inert on Windows: Quit, Open Screenshots Folder and Settings all did nothing,
 and the only way to stop the program was Task Manager.
 
-**18. A quit must not be swallowed by the editor.** `ViewportCommand::Close`
+**18. ~~A quit must not be swallowed by the editor~~ — retired by the split.**
+Quit now ends the listener's event loop and the editor is a different process,
+so there is nothing to swallow it. The original bug, kept because it returns
+with any merge: `ViewportCommand::Close`
 arrives as `close_requested` on the *next* frame, by the same route as the
 window's close button — so invariant 6's `CancelClose` cancelled the tray's Quit
 too, and the program could not be closed at all while the editor was open.
@@ -203,7 +229,8 @@ too, and the program could not be closed at all while the editor was open.
 ## Commands
 
 ```sh
-cargo run -p screenx                  # debug build
+cargo run -p screenx --bin screenx    # the listener; spawns the worker beside it
+cargo run -p screenx --bin screenx-capture -- --region   # one screenshot, alone
 cargo test --manifest-path core/Cargo.toml
 cargo test --manifest-path app/Cargo.toml
 ./app/bundle.sh                       # release .app, ad-hoc signed, host arch
@@ -264,7 +291,12 @@ level, key focus, activation and the tray icon are checked by running it.
   It was measured against overlay texture size and overlay window size and does
   not move with either, so it is not the capture, the texture or the
   framebuffer. Do not "fix" it by downscaling the overlay; that was tried and
-  bought nothing.
+  bought nothing. Ending the process is what gives it back, which is what the
+  split does.
+- **The two binaries ship together.** `screenx` finds `screenx-capture` beside
+  its own `current_exe`, not on the PATH. Shipping one without the other gives a
+  tray icon whose shortcuts silently do nothing. `app/bundle.sh` and the release
+  workflow still package a single binary and need updating before this ships.
 - **Overlay window level is 1000** (`NSScreenSaverWindowLevel`), set via `objc2`
   because always-on-top sits below the macOS menu bar (level 24).
 - **macOS lists only visible windows.** Minimised or fully covered windows
