@@ -17,8 +17,9 @@ egui interface**. There is no webview, no HTML and no JavaScript. Fully offline
 
 - Two crates. `core/` reads the screen and writes files; `app/` draws.
 - `app/src/main.rs` → `main()` at the bottom. One process, one event loop, one
-  window that is hidden until a capture needs it.
-- 23 core tests, 13 app tests. All must stay green.
+  window. It is hidden between captures on macOS and *parked* on Windows, which
+  is not the same thing — read invariant 14 before touching it.
+- 23 core tests, 18 app tests. All must stay green.
 - `src-tauri/` and `ui/` are the **previous webview build**, kept only until the
   native one has been used for a while. Do not add to them.
 
@@ -36,12 +37,13 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | File | Lines | Holds |
 | --- | ---: | --- |
 | `app/src/editor.rs` | 669 | Editor state, tools, history, toolbar, canvas input |
-| `app/src/main.rs` | 558 | App state machine, tray and hotkey wiring, window lifecycle |
+| `app/src/main.rs` | 889 | App state machine, tray and hotkey wiring, window lifecycle, Windows taskbar |
 | `app/src/render.rs` | 366 | Shapes drawn twice: onto the saved image, and on screen |
 | `app/src/edits.rs` | 227 | Crop, cut out, blur, pixelate — the edits that rewrite pixels |
 | `app/src/overlay.rs` | 207 | Selection overlay |
 | `app/src/tray.rs` | 101 | Menu bar icon and the paths it opens |
-| `core/src/capture.rs` | 514 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
+| `app/build.rs` | 20 | Links the Windows icon resource. Windows host only |
+| `core/src/capture.rs` | 528 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
 | `core/src/naming.rs` | 332 | Filename pattern expansion + its tests |
 | `core/src/settings.rs` | 217 | The single JSON settings file |
 
@@ -58,13 +60,16 @@ compile it, never copy from it, never commit it.** It is gitignored.
 | Add a filename token | `core/src/naming.rs` — `TOKENS` array (**longest first**) and `expand()`, then the README table |
 | Add an editor tool | `app/src/editor.rs` — `Tool` enum (39) and `Tool::ALL` (61), a case in the drag or click handler in `ui()` (437), then **both** functions in `render.rs`. Read invariant 5 |
 | Add a shape | `app/src/editor.rs` `Shape` (79), then `draw_shapes_into` (render.rs 215) **and** `draw_on_screen` (render.rs 268) |
-| Change what happens after a capture | `app/src/main.rs` — `deliver()` (159) |
+| Change what happens after a capture | `app/src/main.rs` — `deliver()` (175) |
 | Change region selection behaviour | `app/src/overlay.rs` — `update()` |
-| Change the tray menu | `app/src/tray.rs` — `build()` (66) |
-| Change hotkey parsing | `app/src/main.rs` — `parse_hotkey()` (330). Read invariant 3 |
-| Show or hide the window | `app/src/main.rs` — `open_editor` (176), `begin_region` (121), `go_idle` (210). Read invariants 6 and 7 |
-| Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (283). Read invariant 1 |
-| Measure memory | `app/src/main.rs` — `memcheck()` (368) |
+| Change the tray menu | `app/src/tray.rs` — `build()` (66). Read invariant 17 |
+| Change hotkey parsing | `app/src/main.rs` — `parse_hotkey()` (596). Read invariant 3 |
+| Show or hide the window | `app/src/main.rs` — `open_editor` (192), `begin_region` (134), `go_idle` (232), `park` (503/523). Read invariants 6, 7, 14 and 15 |
+| Change the Windows taskbar button | `app/src/main.rs` — `mod taskbar` (327). Read invariant 16 |
+| Move the editor window | `app/src/main.rs` — `editor_position()` (466) |
+| Read the screen | `core/src/capture.rs` — `capture_primary()` (208). `capture_monitors()` (218) reads every display and is only for the old webview build |
+| Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (297). Read invariant 1 |
+| Measure memory | `app/src/main.rs` — `memcheck()` (634) |
 
 ---
 
@@ -113,6 +118,7 @@ instead.
 keeps a framebuffer the size it was last shown at, so an editor left at full
 screen size holds that for as long as the app runs. `go_idle` also calls
 `forget_all_images`, because dropping a texture handle only queues the release.
+On Windows it must not actually hide — see invariant 14.
 
 **8. A capture is in physical pixels and egui lays out in points.** The density
 travels with the image into the editor, which divides by it. Drawing one for one
@@ -142,6 +148,43 @@ the normal activation order, so ordering the overlay front does not make it
 arrives dimmed, with an arrow cursor, and its first click is spent activating.
 `raise_and_activate` uses `activateIgnoringOtherApps:` because the modern
 `activate()` is cooperative on macOS 14 and later and the system defers it.
+
+**14. On Windows the window is parked, never hidden.** Windows does not paint a
+window it considers hidden, winit emits no `RedrawRequested` for an unpainted
+window, and `eframe::App::update` only runs on a redraw — so hiding the window
+stopped the app draining its own request channel. The hotkey still fired and the
+system still delivered it, with nothing left listening: it worked exactly once
+per launch, until the first capture finished and put the window away. `park()`
+keeps it visible at one point square, click-through, in the corner of the
+primary display. `ViewportBuilder::with_visible(false)` does not hold on Windows
+either, which is why `update` applies the idle state on its first frame.
+
+**15. `ViewportCommand::Focus` goes last.** winit applies a window level change
+as an asynchronous `SetWindowPos` carrying `SWP_NOACTIVATE`. Sent after a focus
+request it lands later and takes the activation straight back, so the editor
+opened behind every other window and would not come forward until the user
+clicked a different application. Anything reordering the window belongs before
+the focus request, never after.
+
+**16. Do not set window styles behind winit's back.** `apply_diff` recomputes
+the whole extended style from winit's own flags and writes it with
+`SetWindowLongW`, so any bit it does not model is erased the next time
+decorations, window level, visibility or mouse passthrough change — and opening
+the editor changes four of them. The taskbar button therefore uses
+`ITaskbarList::AddTab`/`DeleteTab`, which is independent of the style.
+
+**17. The tray menu needs tray-icon 0.24 or newer.** 0.19 shows the menu with
+`TrackPopupMenu` on its own hidden window, never calls
+`attach_menu_subclass_for_hwnd`, and has no `WM_COMMAND` arm — so every
+selection reached `DefWindowProcW` and was dropped. The whole tray menu was
+inert on Windows: Quit, Open Screenshots Folder and Settings all did nothing,
+and the only way to stop the program was Task Manager.
+
+**18. A quit must not be swallowed by the editor.** `ViewportCommand::Close`
+arrives as `close_requested` on the *next* frame, by the same route as the
+window's close button — so invariant 6's `CancelClose` cancelled the tray's Quit
+too, and the program could not be closed at all while the editor was open.
+`App::quitting` marks the close that must be allowed through.
 
 ---
 
@@ -206,9 +249,22 @@ level, key focus, activation and the tray icon are checked by running it.
 
 ## Platform notes
 
-- **Windows is unverified.** The native build has not been run there at all. It
-  compiles for it, and `tray-icon` and `global-hotkey` support it, but treat
-  every Windows claim as untested until someone runs it.
+- **Windows has been run.** Capture, the overlay, the editor, both hotkeys, the
+  tray menu, the taskbar button and quitting were all exercised on Windows 11
+  across a two-monitor desktop. Invariants 14 to 18 are the bugs that found.
+  What is *not* covered by a test there is the same list as anywhere else:
+  window level, focus and the tray need a real screen.
+- **The Windows executable icon comes from `app/build.rs`.** Explorer, Alt-Tab
+  and the taskbar read an `RT_GROUP_ICON` resource out of the binary, which
+  `tauri-build` used to supply. Without it winit finds no icon to fall back on
+  and the window shows a blank one. Explorer caches icons hard, so rename the
+  file or clear the cache before deciding it did not work.
+- **Idle memory is renderer warm-up, not a leak.** Private working set settles
+  about 30 MB above launch after the first rendered frame and then stays flat.
+  It was measured against overlay texture size and overlay window size and does
+  not move with either, so it is not the capture, the texture or the
+  framebuffer. Do not "fix" it by downscaling the overlay; that was tried and
+  bought nothing.
 - **Overlay window level is 1000** (`NSScreenSaverWindowLevel`), set via `objc2`
   because always-on-top sits below the macOS menu bar (level 24).
 - **macOS lists only visible windows.** Minimised or fully covered windows
@@ -221,7 +277,7 @@ level, key focus, activation and the tray icon are checked by running it.
 ## Documentation
 
 Changing `README.md`, `docs/TECHNICAL.md` or `AGENTS.md`? Read
-`.claude/skills/screenx-docs/SKILL.md` first. It covers which register each
+`.agents/skills/screenx-docs/SKILL.md` first. It covers which register each
 document uses, the ASD-STE100 rules the README follows, and the rules on figures
 — performance numbers are approximate and marked so, artifact sizes are not
 written down at all.

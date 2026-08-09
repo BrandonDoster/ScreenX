@@ -326,23 +326,89 @@ identity stable across rebuilds so the grant is not given again every time.
 also the condition the overlay has to work under; see the activation note in
 section 6.
 
-Windows has no equivalent script yet, and the native build has not been run
-there.
+Windows has no equivalent script. It does not need one: the release job builds
+`screenx.exe` and ships that single file, and nothing about Screen Recording
+permission applies. What Windows does need is `app/build.rs`, which links the
+`RT_GROUP_ICON` resource that Explorer, Alt-Tab and the taskbar read out of the
+binary. `tauri-build` supplied that for the webview build and the native one had
+no replacement, so the executable shipped with a blank icon. winit falls back to
+that resource for the window icon too, so one build script covers both.
+
+### What Windows needed that macOS did not
+
+The native build has now been run on Windows 11 across a two-monitor desktop.
+Four things behaved differently enough to be worth recording, because all four
+present as something other than what they are.
+
+**A hidden window stops the program.** Windows does not paint a window it
+considers hidden, winit raises no `RedrawRequested` for a window it does not
+paint, and `eframe::App::update` runs only on a redraw. Hiding the window
+between captures therefore stopped the app draining its own request channel. The
+shortcut still fired and the system still delivered it — nothing was listening.
+It looked like the shortcut had been unregistered, and it was not: probing
+`RegisterHotKey` from outside returned `ERROR_HOTKEY_ALREADY_REGISTERED`, which
+proved the app still held it. So on Windows the window is parked instead: one
+point square, click-through, in the corner of the primary display, and still
+nominally visible. `ViewportBuilder::with_visible(false)` does not hold there
+either, which is why the idle state is applied from inside the first frame.
+
+**Focus is taken back by whatever reorders the window next.** winit applies a
+window level change as an asynchronous `SetWindowPos` carrying `SWP_NOACTIVATE`.
+Sent after a focus request it lands afterwards and undoes it, so the editor
+opened behind everything and stayed half-buried until the user clicked another
+application, which forced Windows to recompute the Z-order. The focus request
+now goes last in both the overlay and editor paths.
+
+**Window styles set behind winit's back do not survive.** `apply_diff`
+recomputes the entire extended style from winit's own flags and writes it with
+`SetWindowLongW`, erasing any bit it does not model. Opening the editor changes
+four flags, so a `WS_EX_APPWINDOW` taskbar button was overwritten every time.
+`ITaskbarList::AddTab`/`DeleteTab` is used instead, which is what winit itself
+uses and is independent of the style.
+
+**The tray menu was inert.** `tray-icon` 0.19 shows the menu with
+`TrackPopupMenu` on its own hidden window, never calls
+`attach_menu_subclass_for_hwnd`, and carries no `WM_COMMAND` arm — so every
+selection fell through to `DefWindowProcW`. Quit, Open Screenshots Folder and
+Settings had never worked on Windows, and the only way to stop the program was
+Task Manager. 0.24 installs the subclass. That is the minimum version.
+
+### Idle memory on Windows
+
+Private working set starts around 42 MB, rises while the overlay is up, and
+settles roughly 30 MB above launch. It then stays flat over repeated captures,
+so it is not a leak.
+
+It is also not any of the obvious candidates, and each was measured rather than
+argued. Opening no editor at all still retains it, so it is not the editor.
+Running the capture three times in a process with no window returns the buffer
+completely, so it is not the image or the allocator. Shrinking the overlay
+texture from 29.5 MB to 3.3 MB does not move it, so it is not the texture.
+Shrinking the overlay window does not move it either, so it is not the
+framebuffer. What is left is one-time renderer and driver warm-up on the first
+genuinely rendered frame.
+
+The consequence for anyone tempted to reduce it: downscaling the overlay buys
+nothing, and that has been tried. The only approach with a real prospect is
+holding no GL context while idle, which the parking rule above forbids inside a
+single process.
 
 ---
 
 ## 14. Tests
 
-Two `cargo test` suites.
+Two `cargo test` suites: 23 in `core/`, 18 in `app/`.
 
 `core/` covers filename patterns, settings round-trips, rectangle maths,
 clipping, cropping, scale normalisation and encoding.
 
 `app/` covers the edits that rewrite pixels — including that a cut out at the
 leading edge does not eat 20 px of real image, and that blur destroys
-high-frequency detail — the overlay's coordinate reporting, and the editor's
+high-frequency detail — the overlay's coordinate reporting, the editor's
 history: that adding a shape does not copy the image, that history stays inside
-its byte budget, and that undo walks back across a destructive edit.
+its byte budget, and that undo walks back across a destructive edit, and where
+the editor window opens, including that a position on a monitor that is no
+longer attached is not reused.
 
 The previous build needed a third layer, because macOS WKWebView has no
 WebDriver support and the only way to test the real engine was to run it. The
@@ -374,6 +440,15 @@ that happened.
 11. Blur and pixelate must destroy pixels; test against high-frequency detail.
 12. Pointer input is clamped to the image.
 13. An accessory app must activate, not merely take focus.
+14. On Windows the window is parked, never hidden, or the event loop stops and
+    the shortcut goes unanswered.
+15. `ViewportCommand::Focus` is sent last; anything reordering the window
+    afterwards carries `SWP_NOACTIVATE` and cancels it.
+16. Window styles are not set behind winit's back; it rewrites the extended
+    style wholesale.
+17. The tray menu needs `tray-icon` 0.24 or newer, or no menu item does
+    anything on Windows.
+18. A quit must not be swallowed by the editor's `CancelClose`.
 
 ---
 

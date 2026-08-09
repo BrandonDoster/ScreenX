@@ -57,6 +57,20 @@ struct App {
     requests: Receiver<Request>,
     /// Shown in the overlay's place after a save, briefly.
     status: Option<(String, std::time::Instant)>,
+    /// The idle state has to be applied from inside the loop, not from the
+    /// options: on Windows the window arrives visible, decorated and 800x600
+    /// whatever `ViewportBuilder` asked for, which is the black box on screen
+    /// at launch.
+    settled: bool,
+    /// Where the editor was last dragged to, so the next one opens there.
+    editor_pos: Option<egui::Pos2>,
+    /// Set once the user has actually asked to leave.
+    ///
+    /// The editor cancels the close it is sent, because closing the editor must
+    /// not take the app down with it — but `Close` arrives by the same route, so
+    /// without this a quit issued while the editor was open was cancelled too,
+    /// and the only way out was Task Manager.
+    quitting: bool,
 }
 
 impl App {
@@ -73,6 +87,9 @@ impl App {
             mode: Mode::Idle,
             requests,
             status: None,
+            settled: false,
+            editor_pos: None,
+            quitting: false,
         }
     }
 
@@ -90,19 +107,15 @@ impl App {
     }
 
     /// Capture whichever monitor the work is for.
+    ///
+    /// ponytail: primary monitor only. A second monitor is a second viewport
+    /// rather than a different design; add it when the overlay needs to span
+    /// them. Reading only the one is also what keeps the wait short — the
+    /// capture is a full framebuffer copy per display.
     fn shoot(&mut self, delayed: bool) -> Option<capture::MonitorShot> {
         Self::wait(delayed);
-        match capture::capture_monitors() {
-            // ponytail: primary monitor only. A second monitor is a second
-            // viewport rather than a different design; add it when someone has
-            // two to test it on.
-            Ok(shots) => match shots.into_iter().next() {
-                Some(shot) => Some(shot),
-                None => {
-                    self.report("no monitors found".into());
-                    None
-                }
-            },
+        match capture::capture_primary() {
+            Ok(shot) => Some(shot),
             Err(err) => {
                 self.report(err);
                 None
@@ -131,9 +144,12 @@ impl App {
             bounds.width as f32,
             bounds.height as f32,
         )));
+        raise_and_activate(ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        // Focus goes last, always. The commands are applied in the order they
+        // are queued, and anything touching the window level afterwards carries
+        // `SWP_NOACTIVATE` — which silently takes the activation back.
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        raise_and_activate();
     }
 
     /// Leave the overlay and give the capture back.
@@ -186,20 +202,26 @@ impl App {
             .unwrap_or((1400.0, 900.0));
         let scale = (max_w / width).min(max_h / height).min(1.0);
 
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+        let size = egui::vec2(
             (width * scale).max(560.0),
             (height * scale).max(360.0) + 72.0,
-        )));
+        );
+
         ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Title("ScreenX Editor".into()));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        raise_normal();
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
-            bounds.first().map(|b| b.x as f32 + 40.0).unwrap_or(80.0),
-            bounds.first().map(|b| b.y as f32 + 40.0).unwrap_or(80.0),
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(editor_position(
+            self.editor_pos,
+            &bounds,
+            size,
         )));
+        raise_normal(ctx);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        // See `begin_region`: focus is only kept if nothing reorders the window
+        // after it.
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
+
 
     /// Put the window away and give back what it was holding.
     ///
@@ -212,9 +234,9 @@ impl App {
         // Releases the uploaded capture on the GPU side. Dropping the handle
         // alone leaves it queued until egui next collects.
         ctx.forget_all_images();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(1.0, 1.0)));
+        park(ctx);
         // Textures are freed on the frame after their handle drops.
         ctx.request_repaint();
     }
@@ -232,9 +254,22 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.settled {
+            self.settled = true;
+            self.go_idle(ctx);
+        }
+
+        // Reads last frame's mode, which is a frame behind and invisible. The
+        // call itself is free unless the answer changed.
+        #[cfg(target_os = "windows")]
+        taskbar::show(_frame, matches!(self.mode, Mode::Editing(_)));
+
         while let Ok(request) = self.requests.try_recv() {
             match request {
-                Request::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Request::Quit => {
+                    self.quitting = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
                 // A second press while an overlay is up is the user asking
                 // again for what is already on screen.
                 Request::Region { delayed } => {
@@ -262,16 +297,231 @@ impl eframe::App for App {
                 // this is the only viewport there is. ScreenX lives in the menu
                 // bar, so closing the editor has to mean closing the editor.
                 let closing = ctx.input(|i| i.viewport().close_requested());
+                // A quit is the one close the editor must not swallow.
+                if closing && self.quitting {
+                    return;
+                }
                 if editor.done || closing {
                     if closing {
                         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                     }
+                    // Read the position before the window is shrunk into its
+                    // parking space, or the corner is all that gets remembered.
+                    self.editor_pos = ctx.input(|i| i.viewport().outer_rect).map(|r| r.min);
                     self.go_idle(ctx);
                 }
             }
             Mode::Idle => {}
         }
     }
+}
+
+/// The taskbar button, which should exist only while there is a window worth
+/// clicking on.
+///
+/// egui cannot do this: `taskbar` is a `ViewportBuilder` field with no matching
+/// `ViewportCommand`, and winit's version removes the button through
+/// `ITaskbarList::DeleteTab` for the life of the process. The extended style is
+/// the one route that can be turned back on.
+#[cfg(target_os = "windows")]
+mod taskbar {
+    use std::cell::Cell;
+    use std::ffi::c_void;
+
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    #[repr(C)]
+    struct Guid {
+        data1: u32,
+        data2: u16,
+        data3: u16,
+        data4: [u8; 8],
+    }
+
+    const CLSID_TASKBAR_LIST: Guid = Guid {
+        data1: 0x56fd_f344,
+        data2: 0xfd6d,
+        data3: 0x11d0,
+        data4: [0x95, 0x8a, 0x00, 0x60, 0x97, 0xc9, 0xa0, 0x90],
+    };
+    const IID_TASKBAR_LIST: Guid = Guid {
+        data1: 0x56fd_f342,
+        data2: 0xfd6d,
+        data3: 0x11d0,
+        data4: [0x95, 0x8a, 0x00, 0x60, 0x97, 0xc9, 0xa0, 0x90],
+    };
+    const CLSCTX_INPROC_SERVER: u32 = 1;
+    const COINIT_APARTMENTTHREADED: u32 = 2;
+
+    /// Only the first six entries are ever called, but the layout has to match
+    /// the real vtable or the offsets are wrong.
+    #[repr(C)]
+    struct Vtbl {
+        query_interface: unsafe extern "system" fn(*mut List, *const Guid, *mut *mut c_void) -> i32,
+        add_ref: unsafe extern "system" fn(*mut List) -> u32,
+        release: unsafe extern "system" fn(*mut List) -> u32,
+        hr_init: unsafe extern "system" fn(*mut List) -> i32,
+        add_tab: unsafe extern "system" fn(*mut List, isize) -> i32,
+        delete_tab: unsafe extern "system" fn(*mut List, isize) -> i32,
+        activate_tab: unsafe extern "system" fn(*mut List, isize) -> i32,
+        set_active_alt: unsafe extern "system" fn(*mut List, isize) -> i32,
+    }
+
+    #[repr(C)]
+    struct List {
+        vtbl: *const Vtbl,
+    }
+
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoInitializeEx(reserved: *mut c_void, model: u32) -> i32;
+        fn CoCreateInstance(
+            clsid: *const Guid,
+            outer: *mut c_void,
+            context: u32,
+            iid: *const Guid,
+            out: *mut *mut c_void,
+        ) -> i32;
+    }
+
+    thread_local! {
+        /// Built once and kept. `HrInit` is the expensive part and it only
+        /// needs doing when the shell connection is first made.
+        static LIST: Cell<*mut List> = const { Cell::new(std::ptr::null_mut()) };
+        static WANTED: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+
+    fn list() -> *mut List {
+        LIST.with(|cached| {
+            if !cached.get().is_null() {
+                return cached.get();
+            }
+            let mut raw: *mut c_void = std::ptr::null_mut();
+            unsafe {
+                // Already initialised by winit on this thread; a second call
+                // returns S_FALSE and is harmless.
+                CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED);
+                if CoCreateInstance(
+                    &CLSID_TASKBAR_LIST,
+                    std::ptr::null_mut(),
+                    CLSCTX_INPROC_SERVER,
+                    &IID_TASKBAR_LIST,
+                    &mut raw,
+                ) < 0
+                {
+                    return std::ptr::null_mut();
+                }
+                let taskbar = raw.cast::<List>();
+                if ((*(*taskbar).vtbl).hr_init)(taskbar) < 0 {
+                    ((*(*taskbar).vtbl).release)(taskbar);
+                    return std::ptr::null_mut();
+                }
+                cached.set(taskbar);
+                taskbar
+            }
+        })
+    }
+
+    /// Add or remove the taskbar button.
+    ///
+    /// Not done through `WS_EX_APPWINDOW`: winit recomputes the whole extended
+    /// style from its own flags and writes it back whenever decorations, the
+    /// window level, visibility or mouse passthrough change, which erases any
+    /// bit it does not know about. Opening the editor changes four of those, so
+    /// a style-based version is overwritten every time. This is the same route
+    /// winit itself uses, and it is independent of the style.
+    pub fn show(frame: &eframe::Frame, wanted: bool) {
+        // Two COM calls per mode change, none per frame.
+        if WANTED.with(|w| w.get()) == Some(wanted) {
+            return;
+        }
+        let Ok(handle) = frame.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+            return;
+        };
+        let taskbar = list();
+        if taskbar.is_null() {
+            return;
+        }
+        let hwnd = win32.hwnd.get();
+        unsafe {
+            let vtbl = &*(*taskbar).vtbl;
+            if wanted {
+                (vtbl.add_tab)(taskbar, hwnd);
+            } else {
+                (vtbl.delete_tab)(taskbar, hwnd);
+            }
+        }
+        WANTED.with(|w| w.set(Some(wanted)));
+    }
+}
+
+/// Where to put the editor: where it was last left, if that is still a place on
+/// somebody's screen, and centred on the primary display if not.
+///
+/// The old placement was the top left corner of the primary monitor every time,
+/// which on a wide desktop is a long way from wherever the work is.
+fn editor_position(
+    last: Option<egui::Pos2>,
+    bounds: &[capture::Rect],
+    size: egui::Vec2,
+) -> egui::Pos2 {
+    // A monitor can be unplugged between one capture and the next, so a
+    // remembered position is only reused while it still lands on a screen.
+    if let Some(last) = last {
+        if bounds.iter().any(|b| b.contains(last.x as i32, last.y as i32)) {
+            return last;
+        }
+    }
+    bounds
+        .first()
+        .map(|b| {
+            egui::pos2(
+                b.x as f32 + (b.width as f32 - size.x).max(0.0) / 2.0,
+                b.y as f32 + (b.height as f32 - size.y).max(0.0) / 2.0,
+            )
+        })
+        .unwrap_or(egui::pos2(80.0, 80.0))
+}
+
+/// Where the window waits between captures.
+///
+/// Windows never paints a window it considers hidden, and a window that is not
+/// painted gets no `RedrawRequested` — which is the only thing that runs
+/// `update`. Hiding the window therefore stopped the app reading its own
+/// request channel: the hotkey still fired, the system still delivered it, and
+/// nothing was left listening. It worked exactly once per launch, until the
+/// first capture finished and put the window away.
+///
+/// So on Windows the window stays nominally visible and is parked instead: one
+/// point across, in the far corner of the primary display, underneath every
+/// other window and transparent to the mouse. Nothing can see it or click it,
+/// and the event loop keeps running.
+#[cfg(target_os = "windows")]
+fn park(ctx: &egui::Context) {
+    let corner = capture::monitor_bounds()
+        .first()
+        .map(|b| egui::pos2((b.right() - 1) as f32, (b.bottom() - 1) as f32))
+        .unwrap_or(egui::pos2(0.0, 0.0));
+    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(corner));
+    // Deliberately `Normal` and not `AlwaysOnBottom`. Leaving the level alone
+    // is what keeps the editor's activation from being undone: winit applies a
+    // level change as an *asynchronous* `SetWindowPos` carrying
+    // `SWP_NOACTIVATE`, which lands after the frame that asked for focus and
+    // pushes the window straight back down. A click-through window one point
+    // across needs no help staying out of the way.
+    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+    ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+}
+
+/// Everywhere else a hidden window still gets its draw callback, so it can
+/// simply go away.
+#[cfg(not(target_os = "windows"))]
+fn park(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
 }
 
 /// Put the overlay above the menu bar and make the app active.
@@ -283,7 +533,7 @@ impl eframe::App for App {
 /// `activate()` is cooperative on macOS 14 and later and gets deferred, so this
 /// uses the deprecated call that does not ask.
 #[cfg(target_os = "macos")]
-fn raise_and_activate() {
+fn raise_and_activate(_ctx: &egui::Context) {
     use objc2_app_kit::{NSApplication, NSWindow};
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
@@ -301,7 +551,7 @@ fn raise_and_activate() {
 
 /// The editor is an ordinary window, so it must come back below the menu bar.
 #[cfg(target_os = "macos")]
-fn raise_normal() {
+fn raise_normal(_ctx: &egui::Context) {
     use objc2_app_kit::{NSApplication, NSWindow};
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
@@ -316,11 +566,27 @@ fn raise_normal() {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn raise_and_activate() {}
+/// Undo the parking. Both of these have to clear the click-through, or the
+/// overlay comes back unable to receive the drag it exists to collect.
+#[cfg(target_os = "windows")]
+fn raise_and_activate(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+        egui::WindowLevel::AlwaysOnTop,
+    ));
+}
 
-#[cfg(not(target_os = "macos"))]
-fn raise_normal() {}
+#[cfg(target_os = "windows")]
+fn raise_normal(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn raise_and_activate(_ctx: &egui::Context) {}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn raise_normal(_ctx: &egui::Context) {}
 
 /// Parse the configured accelerator, e.g. `Control+Shift+Q`.
 ///
@@ -493,9 +759,9 @@ fn main() -> eframe::Result<()> {
 
     // Held for the life of the process: dropping either unregisters it.
     let hotkeys = GlobalHotKeyManager::new().ok();
-    let region_hotkey = hotkeys.as_ref().and_then(|manager| {
-        let accelerator = settings::get().hotkeys.capture_region;
-        let hotkey = parse_hotkey(&accelerator)?;
+    let register = |accelerator: &str| -> Option<u32> {
+        let manager = hotkeys.as_ref()?;
+        let hotkey = parse_hotkey(accelerator)?;
         match manager.register(hotkey) {
             Ok(()) => Some(hotkey.id()),
             Err(err) => {
@@ -503,9 +769,12 @@ fn main() -> eframe::Result<()> {
                 None
             }
         }
-    });
+    };
+    let configured = settings::get().hotkeys;
+    let region_hotkey = register(&configured.capture_region);
+    let fullscreen_hotkey = register(&configured.capture_fullscreen);
 
-    listen_for_events(sender.clone(), region_hotkey);
+    listen_for_events(sender.clone(), region_hotkey, fullscreen_hotkey);
     // Held for the life of the process: dropping it removes the icon.
     let _tray = tray::build();
 
@@ -514,7 +783,11 @@ fn main() -> eframe::Result<()> {
             .with_decorations(false)
             .with_transparent(true)
             .with_resizable(false)
-            .with_taskbar(false)
+            // The taskbar button stays. There is no `ViewportCommand` for it —
+            // `taskbar` can only be set when the window is built — and winit
+            // implements it as `ITaskbarList::DeleteTab`, which removes the
+            // button for the life of the process. That left the editor with no
+            // way back once it was minimised or buried.
             // Built hidden. It becomes the overlay when a capture asks for it.
             .with_visible(false),
         ..Default::default()
@@ -527,14 +800,72 @@ fn main() -> eframe::Result<()> {
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screens() -> Vec<capture::Rect> {
+        vec![
+            capture::Rect { x: 0, y: 0, width: 5120, height: 1440 },
+            capture::Rect { x: 1680, y: 1440, width: 1920, height: 1080 },
+        ]
+    }
+
+    #[test]
+    fn the_editor_reopens_where_it_was_left() {
+        let size = egui::vec2(800.0, 600.0);
+        // Somewhere on the primary display.
+        let moved = egui::pos2(3000.0, 400.0);
+        assert_eq!(editor_position(Some(moved), &screens(), size), moved);
+        // And on the second one, which is the case a "centre it" rule loses.
+        let elsewhere = egui::pos2(2000.0, 1800.0);
+        assert_eq!(editor_position(Some(elsewhere), &screens(), size), elsewhere);
+    }
+
+    #[test]
+    fn a_position_on_a_monitor_that_is_gone_is_not_reused() {
+        let size = egui::vec2(800.0, 600.0);
+        let unplugged = egui::pos2(9000.0, 3000.0);
+        let placed = editor_position(Some(unplugged), &screens(), size);
+        assert_eq!(placed, egui::pos2((5120.0 - 800.0) / 2.0, (1440.0 - 600.0) / 2.0));
+    }
+
+    #[test]
+    fn the_first_editor_is_centred_rather_than_cornered() {
+        let placed = editor_position(None, &screens(), egui::vec2(800.0, 600.0));
+        assert_eq!(placed, egui::pos2(2160.0, 420.0));
+    }
+
+    #[test]
+    fn an_editor_larger_than_the_screen_still_starts_on_it() {
+        // The window is clamped to the display elsewhere, so the placement only
+        // has to avoid pushing it off the top left.
+        let placed = editor_position(None, &screens(), egui::vec2(9000.0, 4000.0));
+        assert_eq!(placed, egui::pos2(0.0, 0.0));
+    }
+
+    #[test]
+    fn with_no_monitors_at_all_it_still_returns_somewhere() {
+        assert_eq!(
+            editor_position(None, &[], egui::vec2(800.0, 600.0)),
+            egui::pos2(80.0, 80.0)
+        );
+    }
+}
+
 /// Forward hotkey and tray menu events onto the app's channel.
-fn listen_for_events(sender: Sender<Request>, region: Option<u32>) {
+fn listen_for_events(sender: Sender<Request>, region: Option<u32>, fullscreen: Option<u32>) {
     let hotkeys = GlobalHotKeyEvent::receiver().clone();
     let menu = MenuEvent::receiver().clone();
     std::thread::spawn(move || loop {
         if let Ok(event) = hotkeys.try_recv() {
-            if Some(event.id) == region && event.state == global_hotkey::HotKeyState::Pressed {
-                let _ = sender.send(Request::Region { delayed: false });
+            if event.state == global_hotkey::HotKeyState::Pressed {
+                let id = Some(event.id);
+                if id == region {
+                    let _ = sender.send(Request::Region { delayed: false });
+                } else if id == fullscreen {
+                    let _ = sender.send(Request::Fullscreen { delayed: false });
+                }
             }
         }
         if let Ok(event) = menu.try_recv() {

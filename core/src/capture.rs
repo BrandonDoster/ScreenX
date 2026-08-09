@@ -174,39 +174,53 @@ pub fn monitor_bounds() -> Vec<Rect> {
         .collect()
 }
 
+fn shoot(monitor: &xcap::Monitor) -> Result<MonitorShot, String> {
+    let id = monitor.id().unwrap_or(0);
+    // On macOS the id is the CGDirectDisplayID, which is what the framebuffer
+    // read needs.
+    #[cfg(target_os = "macos")]
+    let image = display_image(id)?;
+    #[cfg(not(target_os = "macos"))]
+    let image = monitor
+        .capture_image()
+        .map_err(|e| format!("could not capture a monitor: {e}"))?;
+    let scale = monitor.scale_factor().unwrap_or(1.0);
+    let raw = Rect {
+        x: monitor.x().unwrap_or(0),
+        y: monitor.y().unwrap_or(0),
+        width: monitor.width().unwrap_or(0),
+        height: monitor.height().unwrap_or(0),
+    };
+    Ok(MonitorShot {
+        id,
+        bounds: to_dip(raw, scale, RAW_IS_PHYSICAL),
+        scale,
+        name: monitor.name().unwrap_or_default(),
+        image,
+    })
+}
+
+/// Read only the display the capture is actually going to use.
+///
+/// A capture is a whole framebuffer copy per monitor, and the overlay covers
+/// one of them — so reading every display spent most of a second on a two
+/// monitor desktop and then threw all but one of the images away.
+pub fn capture_primary() -> Result<MonitorShot, String> {
+    let monitors = xcap::Monitor::all().map_err(|e| format!("could not list monitors: {e}"))?;
+    let monitor = monitors
+        .iter()
+        .find(|m| m.is_primary().unwrap_or(false))
+        .or_else(|| monitors.first())
+        .ok_or("no monitors found")?;
+    shoot(monitor)
+}
+
 pub fn capture_monitors() -> Result<Vec<MonitorShot>, String> {
     let monitors = xcap::Monitor::all().map_err(|e| format!("could not list monitors: {e}"))?;
     if monitors.is_empty() {
         return Err("no monitors found".into());
     }
-
-    let mut shots = Vec::with_capacity(monitors.len());
-    for monitor in monitors {
-        let id = monitor.id().unwrap_or(0);
-        // On macOS the id is the CGDirectDisplayID, which is what the
-        // framebuffer read needs.
-        #[cfg(target_os = "macos")]
-        let image = display_image(id)?;
-        #[cfg(not(target_os = "macos"))]
-        let image = monitor
-            .capture_image()
-            .map_err(|e| format!("could not capture a monitor: {e}"))?;
-        let scale = monitor.scale_factor().unwrap_or(1.0);
-        let raw = Rect {
-            x: monitor.x().unwrap_or(0),
-            y: monitor.y().unwrap_or(0),
-            width: monitor.width().unwrap_or(0),
-            height: monitor.height().unwrap_or(0),
-        };
-        shots.push(MonitorShot {
-            id,
-            bounds: to_dip(raw, scale, RAW_IS_PHYSICAL),
-            scale,
-            name: monitor.name().unwrap_or_default(),
-            image,
-        });
-    }
-    Ok(shots)
+    monitors.iter().map(shoot).collect()
 }
 
 /// Visible windows, front-most first, excluding our own.

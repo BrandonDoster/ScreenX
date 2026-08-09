@@ -61,12 +61,11 @@ ScreenX now starts normally. You do this one time only.
 
 ### Windows
 
-Run the installer, then start ScreenX.
+Download `screenx.exe` and run it. There is no installer.
 
-The installer puts ScreenX in your Start menu. It also adds ScreenX to **Apps &
-features**, so you can remove it there. A single `screenx.exe` that needs no
-installation is also available. To remove that one, delete the file. Your
-settings stay in `%APPDATA%\ScreenX`.
+Put the file where you want to keep it. To remove ScreenX, delete the file.
+Your settings stay in `%APPDATA%\ScreenX`. Delete that folder as well to remove
+them.
 
 The application is not signed. Windows shows a blue **Windows protected your
 PC** window the first time. To continue:
@@ -433,8 +432,13 @@ change.
 **Save As.** The editor writes to your screenshot folder. Choose the folder in
 the settings file.
 
-**A test on Windows.** The program is built for Windows and macOS, but this
-version has only been run on macOS. Report what you see on Windows.
+**A wide test on Windows.** ScreenX now runs on Windows. Screenshots, the
+selection overlay, the editor, the keyboard shortcuts, the menu and the icon
+were all used on Windows 11 with two monitors. Only that one computer was used.
+Report what you see on other hardware.
+
+**A screenshot across two monitors.** ScreenX reads the main monitor only. A
+selection cannot cross onto a second monitor.
 
 **GIF recording.** An earlier version had it. It is paused until the screenshot
 side is complete.

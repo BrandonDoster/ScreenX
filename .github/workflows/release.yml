@@ -34,7 +34,8 @@ jobs:
           Windows shows **Windows protected your PC**: click **More info**, then
           **Run anyway**.
 
-          This build has not been run on Windows. Report what you see.
+          ScreenX has been run on Windows 11 with two monitors. Only that one
+          computer was used, so report what you see on other hardware.
           EOF
           gh release create "${{ github.ref_name }}" \
             --title "ScreenX ${{ github.ref_name }}" \

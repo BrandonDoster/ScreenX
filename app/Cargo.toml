@@ -18,12 +18,28 @@ eframe = { version = "0.29", default-features = false, features = [
 ] }
 egui = "0.29"
 # Both are the crates Tauri's own plugins wrap, minus the plugin layer.
-tray-icon = "0.19"
+#
+# 0.24 and not 0.19: the older release shows the tray menu with `TrackPopupMenu`
+# on its own hidden window and never installs muda's subclass there, and it has
+# no `WM_COMMAND` arm of its own — so every selection reached `DefWindowProcW`
+# and was dropped. The whole tray menu was inert on Windows. 0.24 calls
+# `attach_menu_subclass_for_hwnd`, which is what routes the click.
+tray-icon = "0.24"
 global-hotkey = "0.6"
 # Glyph outlines for text drawn into the saved image. The geometry is a few
 # dozen lines here rather than a rasterisation crate, and the font is the one
 # egui already embeds.
 ab_glyph = "0.2"
+
+# The maintained fork of `winres`, which is unmaintained. Build-time only: it
+# shells out to the SDK's resource compiler and links the result.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+# Already in the tree underneath eframe; named here to get at the window handle,
+# which is the only way to reach the taskbar button. No new code is compiled.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
