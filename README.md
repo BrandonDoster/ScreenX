@@ -27,6 +27,12 @@ system, so it does not contain a browser.
 
 ## Install
 
+> **This version is not released yet.** ScreenX has been rewritten and does not
+> use a web browser engine any more. There is no installer for this version. To
+> use it, build it — see [For developers](#for-developers).
+>
+> The instructions below are for the released version, 0.2.1.
+
 ### macOS
 
 Use [Homebrew](https://brew.sh). ScreenX starts with no warning.
@@ -54,35 +60,20 @@ ScreenX now starts normally. You do this one time only.
 
 ### Windows
 
-There are two Windows downloads. Use the one that you prefer.
-
-**To install ScreenX:**
-
-1. Run `ScreenX_0.2.1_x64-setup.exe`.
-2. Start ScreenX.
+Run the installer, then start ScreenX.
 
 The installer puts ScreenX in your Start menu. It also adds ScreenX to **Apps &
-features**, so you can remove it there.
+features**, so you can remove it there. A single `screenx.exe` that needs no
+installation is also available. To remove that one, delete the file. Your
+settings stay in `%APPDATA%\ScreenX`.
 
-**To run ScreenX without an installation:**
-
-1. Put `screenx.exe` where you want to keep it.
-2. Start it.
-
-`screenx.exe` is one file and it needs nothing next to it. To remove ScreenX,
-delete the file. Your settings stay in `%APPDATA%\ScreenX`. Delete that folder
-too if you do not want them.
-
-The application is not signed yet. Windows shows a blue **Windows protected
-your PC** window the first time. To continue:
+The application is not signed. Windows shows a blue **Windows protected your
+PC** window the first time. To continue:
 
 1. Click **More info**.
 2. Click **Run anyway**.
 
 You do this one time only.
-
-ScreenX needs Windows 11. It uses the Microsoft Edge WebView2 Runtime, which
-Windows 11 includes.
 
 ---
 
@@ -93,12 +84,15 @@ ScreenX puts an icon in the menu bar (macOS) or the notification area
 shortcut.
 
 > **PLACEHOLDER — screenshot: `docs/images/tray-menu.png`**
-> The menu bar icon with its menu open. The menu shows "Capture Entire Screen",
-> "Capture Region or Window", "Open Screenshots Folder", "Settings..." and
-> "Quit ScreenX".
+> The menu bar icon with its menu open. The menu shows "Open Screenshots
+> Folder", "Settings..." and "Quit ScreenX".
+>
+> I did not make this screenshot, because the menu is drawn by the operating
+> system and must show a real menu bar. Take it yourself when your screen shows
+> nothing private.
 
-The settings window opens the first time you start ScreenX. Look at the
-screenshot folder. Change it if you want to. Then click **Save**.
+ScreenX writes a settings file with the default values the first time you start
+it. Open it from the menu bar icon to change where your screenshots go.
 
 ### macOS asks for permission
 
@@ -118,56 +112,51 @@ blank:
 
 Press **Ctrl + Alt + F**. ScreenX captures the screen that your pointer is on.
 
-### A part of the screen, or one window
+### A part of the screen
 
-Press **Ctrl + Alt + A**. The screen freezes and becomes dark. Now you have two
-choices.
+Press **Ctrl + Alt + A**. The screen freezes and becomes dark.
 
-**To capture any rectangle:** hold the mouse button down, drag, then let go.
-
-**To capture one window:** move the pointer over the window. Wait for a short
-moment. The window becomes bright and a dashed line appears around it. Its name
-appears in a small label. Click one time.
+Hold the mouse button down, drag, then let go. ScreenX shows the size of your
+rectangle while you drag.
 
 > **PLACEHOLDER — screenshot: `docs/images/overlay.png`**
-> The selection overlay with a window highlighted: the screen dark, one window
-> bright inside a dashed blue outline, and the size and title label above it.
+> The selection overlay: the screen dark, with one bright rectangle inside a
+> blue outline and its size shown above it.
 >
 > I did not make this screenshot, because it must show a real desktop. Take it
 > yourself when your screen shows nothing private.
 
-You do not have to choose a mode. Drag for a rectangle, or wait and click for a
-window. The same tool does both.
+ScreenX keeps the picture that it took when you pressed the shortcut. Your
+screen can change while the overlay is open. The screenshot does not.
 
 While the overlay is open:
 
 | To do this | Do this |
 | --- | --- |
-| Stop the window highlight | Hold Ctrl or Cmd while you move the pointer |
-| Capture the whole screen | Press Enter |
 | Cancel | Press Esc, or click the right mouse button |
 
 **Esc always cancels.** The overlay covers the menu bar, so you cannot reach the
-menu bar icon while the overlay is open. ScreenX takes the Esc key for as long
-as the overlay is on the screen, and gives it back immediately after.
-
-macOS shows only the windows that you can see. ScreenX cannot highlight a window
-that is behind another window, or that is minimised. Bring the window to the
-front first.
+menu bar icon while the overlay is open.
 
 ---
 
 ## Mark up a screenshot
 
-The editor opens after each capture. You can change this in the settings.
+The editor opens after each capture. Set `afterCapture` in the settings file to
+change this.
 
-![The ScreenX editor. It shows a blur, a red box, an orange arrow, a yellow highlight, a step number and a text label on an example window](docs/images/editor.png)
+> **PLACEHOLDER — screenshot: `docs/images/editor.png`**
+> The ScreenX editor, showing a blur, a red box, an orange arrow, a yellow
+> highlight, a step number and a text label on an example window.
+>
+> The picture that was here showed the previous editor, which no longer exists.
+> Take a new one when your screen shows nothing private.
 
 ### The tools
 
 | Tool | What it does |
 | --- | --- |
-| **Select** | Move an item that you drew. Press Delete to remove it. |
+| **Select** | Not yet available. See [What is not here yet](#what-is-not-here-yet). |
 | **Rectangle** | Draw a box. |
 | **Ellipse** | Draw a circle or an oval. |
 | **Arrow** | Draw an arrow. |
@@ -205,89 +194,93 @@ ScreenX shows the band in red while you drag. Press Ctrl+Z to undo.
 ### Colour and size
 
 The second row of the toolbar sets the colour, the fill, the line width and the
-text size. To change an item that you already drew, select it first.
+text size.
+
+### Change the zoom
+
+The editor shows your screenshot at the size it was on screen. A large
+screenshot is made smaller to fit the window. ScreenX never makes a screenshot
+larger on its own.
+
+| Control | What it does |
+| --- | --- |
+| **+** | Zoom in. |
+| **-** | Zoom out. |
+| The percentage | Click it to go back to the fitted size. |
+
+You can also hold Ctrl and turn the mouse wheel.
 
 ### Save your work
 
 | Button | What it does |
 | --- | --- |
 | **Save** | Write the file to your screenshot folder, and close the editor. |
-| **Save As...** | Choose the name and the folder yourself. |
 | **Copy** | Put the image on the clipboard. |
+| **Close** | Close the editor. ScreenX stays in the menu bar. |
+
+To save and copy with one click, set `copyImageOnSave` to `true` in the
+settings file.
 
 ---
 
 ## Settings
 
-Open the settings from the menu bar icon.
+ScreenX keeps all of its settings in one JSON file. There is no settings
+window. Click **Settings...** in the menu bar icon. Your text editor opens the
+file.
 
-![The General tab of the ScreenX settings window](docs/images/settings.png)
+Save the file after you change it. ScreenX reads the file again for each
+screenshot, so you do not restart the program.
 
 ### General
 
 | Setting | What it does |
 | --- | --- |
-| **Screenshot folder** | Where ScreenX writes your files. |
-| **What happens once a screenshot is taken** | Open the editor, save the file, copy the image, or save and copy. |
-| **Image format** | PNG or JPEG. PNG keeps all detail. JPEG makes smaller files. |
-| **JPEG quality** | 10 to 100. A higher number gives better quality and a larger file. |
-| **Copy the file path** | Put the path of the new file on the clipboard. |
-| **Features** | Turn off a feature that you do not use. It leaves the menu and gives up its shortcut. |
+| `screenshotFolder` | Where ScreenX writes your files. |
+| `afterCapture` | `editor`, `save` or `copy`. |
+| `imageFormat` | `png` or `jpg`. PNG keeps all detail. JPEG makes smaller files. |
+| `jpegQuality` | 10 to 100. A higher number gives better quality and a larger file. |
+| `copyPathAfterSave` | Put the path of the new file on the clipboard. |
+| `copyImageOnSave` | Put the image on the clipboard when you click Save in the editor. |
 
 ### Capture
 
-**Rest this long before a window highlights** sets the wait time in
-milliseconds. The default is 400.
+`captureDelayMs` sets a delay in milliseconds. The default is 0, which reads
+the screen immediately.
 
-- Use a smaller number for a faster highlight.
-- Use 0 to highlight as soon as the pointer moves over a window.
-- Use a larger number if the highlight appears when you do not want it.
-
-**Wait this long after the shortcut before the capture** sets a delay in
-milliseconds. The default is 0, which reads the screen immediately.
+The shortcuts never wait. Only the two delayed items in the menu bar icon use
+this delay, so an ordinary screenshot stays fast.
 
 Use this setting to take a screenshot of an open menu. A menu closes as soon as
 you press a shortcut or as soon as the overlay opens, so a menu cannot be in a
 screenshot that you start while the menu is open.
 
-1. Set the delay to 5000.
-2. Press the shortcut.
+1. Set `captureDelayMs` to 5000.
+2. Click **Capture Region After Delay** in the menu bar icon.
 3. Open the menu.
 4. Wait. ScreenX reads the screen with the menu still shown.
 
-The delay applies to the whole screen and to the region overlay. The overlay
-shows you the picture that ScreenX already took, so the menu is in it.
+The overlay shows you the picture that ScreenX already took, so the menu is in
+it.
 
-### Hotkeys
+### Shortcuts
 
-![The Hotkeys tab of the ScreenX settings window](docs/images/settings-hotkeys.png)
+Write the shortcut as text, for example `Control+Shift+Q`.
 
-To change a shortcut:
+ScreenX reads the keys exactly as you write them. If you write Control, you get
+Control. ScreenX does not change Control into Command.
 
-1. Click the field.
-2. Press the keys.
+A shortcut must have at least one of Control, Shift, Alt or Command. A shortcut
+works in every application, so choose a combination that no other application
+uses.
 
-To remove a shortcut, click the field and press Backspace.
-
-ScreenX records the keys exactly as you press them. If you press Control, you
-get Control. ScreenX does not change Control into Command.
-
-A shortcut works in every application, so choose a combination that no other
-application uses. If another application already owns your combination, ScreenX
-tells you after you save.
-
-### The settings file
-
-All settings are in one file. You can edit it in a text editor.
+### Where the settings file is
 
 - macOS: `~/Library/Application Support/ScreenX/settings.json`
 - Windows: `%APPDATA%\ScreenX\settings.json`
 
-The **General** tab shows the path. Click the path to open the file.
-
 ScreenX ignores a setting that it does not know, and uses the default for a
-setting that is absent. You cannot stop the application from starting when you
-edit this file.
+setting that is absent.
 
 ---
 
@@ -359,31 +352,27 @@ The **Naming** tab shows an example of your pattern while you type it.
 | Keys | Action |
 | --- | --- |
 | Ctrl + Alt + F | Capture the whole screen |
-| Ctrl + Alt + A | Capture a region or a window |
+| Ctrl + Alt + A | Capture a region |
 
-These are the defaults. Change them in the settings.
+These are the defaults. Change them in the settings file.
 
 ### In the selection overlay
 
 | Keys | Action |
 | --- | --- |
 | Esc | Cancel |
-| Enter | Capture the whole screen |
-| Ctrl or Cmd (hold) | Stop the window highlight |
+| Right click | Cancel |
 
 ### In the editor
 
 | Keys | Action |
 | --- | --- |
-| 1 to 9 | Select one of the first nine tools |
 | Ctrl/Cmd + Z | Undo |
 | Ctrl/Cmd + Shift + Z | Redo |
 | Ctrl/Cmd + C | Copy the image |
 | Ctrl/Cmd + S | Save |
-| Ctrl/Cmd + Shift + S | Save As |
-| Delete | Remove the selected item |
+| Ctrl/Cmd + mouse wheel | Zoom in or out |
 | Esc | Close the editor |
-| Shift (hold while you drag) | Keep a rectangle square, or an ellipse circular |
 
 ---
 
@@ -397,25 +386,20 @@ These are the defaults. Change them in the settings.
 **Windows:** a game in full-screen mode can capture as black. Set the game to
 borderless-window mode.
 
-### A window does not highlight
-
-macOS reports only the windows that you can see. Bring the window to the front,
-then try again.
-
-Also make sure that the window is larger than 48 by 48 pixels. ScreenX ignores
-smaller windows, because they are usually menu bar items and shadows.
-
 ### My shortcut does nothing
 
-Another application has taken the same combination. Open the settings, go to
-**Hotkeys**, and choose a different combination. If the system refuses a
-combination, ScreenX tells you after you save.
+Another application has taken the same combination. Open the settings file from
+the menu bar icon and choose a different combination. ScreenX writes a message
+to its output if the system refuses one.
 
 ### My shortcut does nothing while a menu is open
 
 An open menu takes the keyboard from every other program, so ScreenX does not
 receive the shortcut until the menu closes. This is a rule of the operating
 system and ScreenX cannot change it.
+
+Use **Capture Region After Delay** in the menu bar icon instead. Set
+`captureDelayMs` first. See [Capture](#capture).
 
 To take a screenshot of a menu, set a capture delay. Read
 [Capture](#capture) in the settings section.
@@ -440,33 +424,41 @@ image.
 Quick start:
 
 ```sh
-npm install
-npm run dev        # run it
-npm test           # run the tests
-npm run selfcheck  # check the real webview and window server
-npm run build      # make an installer
+cargo run -p screenx                          # run it
+cargo test --manifest-path core/Cargo.toml    # capture, naming and settings
+cargo test --manifest-path app/Cargo.toml     # editor, edits and overlay
+./app/bundle.sh                               # make the macOS application
 ```
 
 ---
 
 ## What is not here yet
 
+**A second monitor.** ScreenX reads your main monitor only. A screenshot of a
+second monitor is not possible yet.
+
+**The window highlight.** An earlier version let you rest the pointer on a
+window and click once to capture that window. Drag a rectangle instead.
+
+**The Select tool.** It is in the toolbar, but it does nothing yet. You cannot
+move or delete an item after you draw it. Press Ctrl+Z to remove the last one.
+
+**A settings window.** Settings are a JSON file that you edit yourself. The
+menu bar icon opens it. This keeps the program small, and it is not planned to
+change.
+
+**Save As.** The editor writes to your screenshot folder. Choose the folder in
+the settings file.
+
+**A test on Windows.** The program is built for Windows and macOS, but this
+version has only been run on macOS. Report what you see on Windows.
+
 **GIF recording.** An earlier version had it. It is paused until the screenshot
 side is complete.
 
-**A signed application.** Both builds are unsigned, and there is no plan to
-sign them. An Apple Developer ID costs 99 USD each year, which this project
-does not spend. On macOS, install with Homebrew and you never see a warning.
-On Windows, you click through one. The [Install](#install) section has the
-steps.
-
-**A test on more than one monitor on Windows.** ScreenX now runs on Windows.
-Version 0.2.1 fixes a fault that stopped the program after you chose an area.
-Screenshots, markup and saving are all tested on Windows 11 with one monitor.
-
-Two monitors with different scale settings are not tested on Windows. The
-position of your selection can be a small number of pixels out. Report what you
-see.
+**A signed application.** The build is unsigned, and there is no plan to sign
+it. An Apple Developer ID costs 99 USD each year, which this project does not
+spend.
 
 ---
 
