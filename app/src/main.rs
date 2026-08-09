@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Brandon Doster
 
+// A tray application has no console to write to, and Windows opens one for a
+// console subsystem binary — a black window that sits behind the tray icon for
+// the life of the process. Debug builds keep it, because that is where the
+// eprintln! diagnostics go.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! ScreenX: local screen capture, drawn natively.
 //!
 //! One process, one event loop, one window. The window is hidden until a

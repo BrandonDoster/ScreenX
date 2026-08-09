@@ -9,26 +9,52 @@ permissions:
   contents: write
 
 jobs:
+  # The two build jobs run at the same time and both upload to the release, so
+  # one of them has to create it first. `gh release create` is not safe to race.
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<'EOF'
+          **macOS.** Download `ScreenX_universal.zip` below. Move `ScreenX.app`
+          into your Applications folder. The build is not signed by Apple, so
+          macOS blocks a copy you download. Remove the mark one time:
+
+          ```sh
+          xattr -dr com.apple.quarantine /Applications/ScreenX.app
+          ```
+
+          Then give ScreenX permission in **System Settings** > **Privacy &
+          Security** > **Screen Recording**.
+
+          **Windows.** Download `screenx.exe` and run it. There is no installer.
+          Windows shows **Windows protected your PC**: click **More info**, then
+          **Run anyway**.
+
+          This build has not been run on Windows. Report what you see.
+          EOF
+          gh release create "${{ github.ref_name }}" \
+            --title "ScreenX ${{ github.ref_name }}" \
+            ${{ contains(github.ref_name, '-') && '--prerelease' || '' }} \
+            --notes-file notes.md
+
   build:
+    needs: create
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            args: '--target universal-apple-darwin'
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
           - platform: windows-latest
-            args: ''
             rust-targets: ''
 
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -39,56 +65,29 @@ jobs:
       # the default branch — so sibling tags never share one. Every release run
       # logged "No cache found" against a byte-identical key and then spent
       # 1m44s (Windows) uploading 480 MB nothing would read. If release builds
-      # need to get faster, warm a cache on master instead: add
-      # `push: branches: [master]` and guard the tauri-action step with
-      # `if: startsWith(github.ref, 'refs/tags/')`.
+      # need to get faster, warm a cache on master instead.
 
-      - run: npm ci
-
-      - uses: tauri-apps/tauri-action@v0
+      # Ad-hoc signature, applied by bundle.sh. It is free and it is not a
+      # trusted one, so Gatekeeper still warns — but TCC keys the Screen
+      # Recording grant to code identity, and unsigned falls back to the binary
+      # hash. Without it every update looks like a new app and the user has to
+      # grant the permission again. See docs/TECHNICAL.md, Signing.
+      - name: Build the macOS application
+        if: runner.os == 'macOS'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Ad-hoc signature. It is free and it is not a trusted one, so
-          # Gatekeeper still warns — but TCC keys the Screen Recording grant to
-          # code identity, and unsigned falls back to the binary hash. Without
-          # this every update looks like a new app and the user has to grant
-          # the permission again. See docs/TECHNICAL.md, Signing.
-          APPLE_SIGNING_IDENTITY: '-'
-        with:
-          projectPath: .
-          tagName: ${{ github.ref_name }}
-          releaseName: 'ScreenX ${{ github.ref_name }}'
-          releaseBody: |
-            **macOS — install with Homebrew. No warning:**
+        run: |
+          ./app/bundle.sh --universal
+          ditto -c -k --keepParent 'app/target/ScreenX.app' ScreenX_universal.zip
+          gh release upload "${{ github.ref_name }}" ScreenX_universal.zip --clobber
 
-            ```sh
-            brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
-            brew install --cask screenx
-            ```
-
-            Or download `ScreenX_VERSION_universal.dmg` below. These builds are
-            not signed by Apple, so macOS warns on a downloaded copy. Remove the
-            mark and it starts normally:
-
-            ```sh
-            xattr -dr com.apple.quarantine /Applications/ScreenX.app
-            ```
-
-            **Windows 11** — the `-setup.exe` installer, or `screenx.exe` to run
-            portable. Click **More info**, then **Run anyway**.
-          releaseDraft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          args: ${{ matrix.args }}
-
-      # The bundler only publishes installers, but the binary it produces is
-      # already self-contained: its only imports are Windows system DLLs, and
-      # the frontend is compiled into it. So ship it as-is for anyone who wants
-      # no install. Runs after tauri-action, which is what creates the release.
-      - name: Attach the portable Windows binary
-        if: matrix.platform == 'windows-latest'
+      - name: Build the Windows binary
+        if: runner.os == 'Windows'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" src-tauri/target/release/screenx.exe --clobber
+        run: |
+          cargo build --release --manifest-path app/Cargo.toml
+          gh release upload "${{ github.ref_name }}" app/target/release/screenx.exe --clobber
 
       # The cask lives in this repository rather than a homebrew-tap one, so
       # the bump needs no cross-repository token. Users pay for that with the
@@ -98,8 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          dmg=$(find src-tauri/target -name 'ScreenX_*_universal.dmg' | head -1)
-          sha=$(shasum -a 256 "$dmg" | cut -d' ' -f1)
+          sha=$(shasum -a 256 ScreenX_universal.zip | cut -d' ' -f1)
           # actions/checkout leaves a detached HEAD at the tag with no local
           # master, so fetch it into one before switching.
           git fetch origin master:master

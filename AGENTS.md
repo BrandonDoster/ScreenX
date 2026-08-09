@@ -36,7 +36,7 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | File | Lines | Holds |
 | --- | ---: | --- |
 | `app/src/editor.rs` | 669 | Editor state, tools, history, toolbar, canvas input |
-| `app/src/main.rs` | 552 | App state machine, tray and hotkey wiring, window lifecycle |
+| `app/src/main.rs` | 558 | App state machine, tray and hotkey wiring, window lifecycle |
 | `app/src/render.rs` | 366 | Shapes drawn twice: onto the saved image, and on screen |
 | `app/src/edits.rs` | 227 | Crop, cut out, blur, pixelate — the edits that rewrite pixels |
 | `app/src/overlay.rs` | 207 | Selection overlay |
@@ -56,15 +56,15 @@ compile it, never copy from it, never commit it.** It is gitignored.
 | --- | --- |
 | Add a setting | `core/src/settings.rs` `Settings` struct + its `Default`, then read it where it applies. There is no settings UI — the tray opens the JSON file |
 | Add a filename token | `core/src/naming.rs` — `TOKENS` array (**longest first**) and `expand()`, then the README table |
-| Add an editor tool | `app/src/editor.rs` — `Tool` enum (39) and `Tool::ALL` (65), a case in the drag or click handler in `ui()` (437), then **both** functions in `render.rs`. Read invariant 5 |
+| Add an editor tool | `app/src/editor.rs` — `Tool` enum (39) and `Tool::ALL` (61), a case in the drag or click handler in `ui()` (437), then **both** functions in `render.rs`. Read invariant 5 |
 | Add a shape | `app/src/editor.rs` `Shape` (79), then `draw_shapes_into` (render.rs 215) **and** `draw_on_screen` (render.rs 268) |
-| Change what happens after a capture | `app/src/main.rs` — `deliver()` (153) |
+| Change what happens after a capture | `app/src/main.rs` — `deliver()` (159) |
 | Change region selection behaviour | `app/src/overlay.rs` — `update()` |
 | Change the tray menu | `app/src/tray.rs` — `build()` (66) |
-| Change hotkey parsing | `app/src/main.rs` — `parse_hotkey()` (324). Read invariant 3 |
-| Show or hide the window | `app/src/main.rs` — `open_editor` (170), `begin_region` (115), `go_idle` (204). Read invariants 6 and 7 |
+| Change hotkey parsing | `app/src/main.rs` — `parse_hotkey()` (330). Read invariant 3 |
+| Show or hide the window | `app/src/main.rs` — `open_editor` (176), `begin_region` (121), `go_idle` (210). Read invariants 6 and 7 |
 | Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (283). Read invariant 1 |
-| Measure memory | `app/src/main.rs` — `memcheck()` (362) |
+| Measure memory | `app/src/main.rs` — `memcheck()` (368) |
 
 ---
 
@@ -163,8 +163,13 @@ arrives dimmed, with an arrow cursor, and its first click is spent activating.
 cargo run -p screenx                  # debug build
 cargo test --manifest-path core/Cargo.toml
 cargo test --manifest-path app/Cargo.toml
-./app/bundle.sh                       # release .app, ad-hoc signed
+./app/bundle.sh                       # release .app, ad-hoc signed, host arch
+./app/bundle.sh --universal           # both Apple architectures; what CI ships
 ```
+
+`.github/workflows/release.yml` runs on a `v*` tag. It builds this bundle on
+macOS and `screenx.exe` on Windows, and moves the Homebrew cask only for a tag
+with no `-` in it, so a release candidate never becomes the `brew` version.
 
 Memory is measured, not asserted. `--memcheck WIDTH HEIGHT SECONDS [--editor]`
 stands the overlay or the editor up on a synthetic capture and holds it, so
