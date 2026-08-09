@@ -58,6 +58,9 @@ pub struct Settings {
     /// "editor", "save", "copy" or "saveCopy"
     pub after_capture: String,
     pub copy_path_after_save: bool,
+    /// Put the image on the clipboard as well as writing it, when the editor's
+    /// Save is used. Saving and copying are usually wanted together.
+    pub copy_image_on_save: bool,
     pub auto_increment_number: u64,
     /// How long the pointer must rest before a window lights up, in
     /// milliseconds. 0 highlights immediately.
@@ -79,6 +82,7 @@ impl Default for Settings {
             jpeg_quality: 90,
             after_capture: "editor".into(),
             copy_path_after_save: false,
+            copy_image_on_save: false,
             auto_increment_number: 0,
             window_highlight_delay_ms: 400,
             capture_delay_ms: 0,

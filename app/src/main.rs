@@ -107,8 +107,8 @@ impl App {
     /// Capture a whole monitor and save it, with no overlay in between.
     fn capture_fullscreen(&mut self, ctx: &egui::Context, delayed: bool) {
         let Some(shot) = self.shoot(delayed) else { return };
-        let (image, name) = (shot.image, shot.name);
-        self.deliver(ctx, image, name);
+        let (image, name, density) = (shot.image, shot.name, shot.scale);
+        self.deliver(ctx, image, name, density);
     }
 
     /// Read the screen and enter the overlay.
@@ -133,7 +133,7 @@ impl App {
     /// Leave the overlay and give the capture back.
     fn end_selection(&mut self, ctx: &egui::Context, outcome: Outcome) {
         let previous = std::mem::replace(&mut self.mode, Mode::Idle);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.go_idle(ctx);
 
         let Mode::Selecting(overlay) = previous else {
             return;
@@ -145,13 +145,14 @@ impl App {
         let Some(image) = capture::crop_to_rect(overlay.shot(), &rect) else {
             return self.report("that selection was too small to capture".into());
         };
-        self.deliver(ctx, image, overlay.shot().name.clone());
+        let density = overlay.shot().scale;
+        self.deliver(ctx, image, overlay.shot().name.clone(), density);
     }
 
     /// What happens to a finished capture, per the settings file.
-    fn deliver(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String) {
+    fn deliver(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String, density: f32) {
         match settings::get().after_capture.as_str() {
-            "editor" => self.open_editor(ctx, image, title),
+            "editor" => self.open_editor(ctx, image, title, density),
             "clipboard" => self.report(match capture::copy_to_clipboard(&image) {
                 Ok(()) => "copied".into(),
                 Err(err) => err,
@@ -166,9 +167,10 @@ impl App {
         }
     }
 
-    fn open_editor(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String) {
-        let (width, height) = (image.width() as f32, image.height() as f32);
-        self.mode = Mode::Editing(Box::new(Editor::new(image, title)));
+    fn open_editor(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String, density: f32) {
+        let density = if density > 0.0 { density } else { 1.0 };
+        let (width, height) = (image.width() as f32 / density, image.height() as f32 / density);
+        self.mode = Mode::Editing(Box::new(Editor::new(image, title, density)));
 
         // Leave room for the toolbar without running off the screen.
         let bounds = capture::monitor_bounds();
@@ -191,6 +193,24 @@ impl App {
             bounds.first().map(|b| b.x as f32 + 40.0).unwrap_or(80.0),
             bounds.first().map(|b| b.y as f32 + 40.0).unwrap_or(80.0),
         )));
+    }
+
+    /// Put the window away and give back what it was holding.
+    ///
+    /// Dropping the mode releases the capture and its texture, but the window
+    /// keeps a framebuffer the size it was last shown at — an editor left at
+    /// full screen size held that for as long as the app ran. Shrinking it
+    /// first is what actually returns the memory.
+    fn go_idle(&mut self, ctx: &egui::Context) {
+        self.mode = Mode::Idle;
+        // Releases the uploaded capture on the GPU side. Dropping the handle
+        // alone leaves it queued until egui next collects.
+        ctx.forget_all_images();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(1.0, 1.0)));
+        // Textures are freed on the frame after their handle drops.
+        ctx.request_repaint();
     }
 
     fn report(&mut self, message: String) {
@@ -232,10 +252,15 @@ impl eframe::App for App {
             }
             Mode::Editing(editor) => {
                 editor.ui(ctx);
-                if editor.done {
-                    self.mode = Mode::Idle;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(false));
+                // The window's close button asks the whole app to exit, because
+                // this is the only viewport there is. ScreenX lives in the menu
+                // bar, so closing the editor has to mean closing the editor.
+                let closing = ctx.input(|i| i.viewport().close_requested());
+                if editor.done || closing {
+                    if closing {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    }
+                    self.go_idle(ctx);
                 }
             }
             Mode::Idle => {}
@@ -360,16 +385,50 @@ fn memcheck(size: (u32, u32), seconds: u64) -> eframe::Result<()> {
         // The editor holds the image, its texture and the history, which is the
         // combination worth measuring — the overlay only ever holds one frame.
         let image = shot.image.clone();
+        let spare_image = shot.image.clone();
         return eframe::run_native(
             "ScreenX memcheck",
             eframe::NativeOptions::default(),
             Box::new(move |_cc| {
-                let mut editor = editor::Editor::new(image, "memcheck".into());
+                let mut editor = Some(editor::Editor::new(image, "memcheck".into(), 2.0));
+                // Halfway through, put the editor away exactly as closing it
+                // does. Whether the memory comes back is the thing worth
+                // measuring: the editor holding on after it closed was a bug.
+                let close_at = std::time::Instant::now()
+                    + std::time::Duration::from_secs(seconds / 3);
+                let reopen_at = std::time::Instant::now()
+                    + std::time::Duration::from_secs(seconds * 2 / 3);
+                let mut reopened = false;
+                let mut spare = Some(spare_image);
                 Ok(Box::new(Held {
                     draw: Box::new(move |ctx| {
-                        editor.ui(ctx);
+                        let now = std::time::Instant::now();
+                        if now >= close_at && editor.is_some() {
+                            editor = None;
+                            eprintln!("[memcheck] editor closed");
+                            ctx.forget_all_images();
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                                egui::vec2(1.0, 1.0),
+                            ));
+                        }
+                        // Reopen once, to tell a leak apart from memory that
+                        // was freed and handed straight back out again.
+                        if now >= reopen_at && editor.is_none() && !reopened {
+                            reopened = true;
+                            eprintln!("[memcheck] editor reopened");
+                            editor = Some(editor::Editor::new(
+                                spare.take().unwrap(),
+                                "memcheck".into(),
+                                2.0,
+                            ));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        }
+                        if let Some(editor) = &mut editor {
+                            editor.ui(ctx);
+                        }
                         ctx.request_repaint();
-                        if std::time::Instant::now() >= deadline {
+                        if now >= deadline {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     }),

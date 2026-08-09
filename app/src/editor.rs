@@ -16,7 +16,10 @@ use std::sync::Arc;
 
 use eframe::egui;
 use image::RgbaImage;
-use screenx_core::capture::{self, Rect};
+use screenx_core::{
+    capture::{self, Rect},
+    settings,
+};
 
 use crate::edits;
 use crate::render::{self, draw_shapes_into};
@@ -107,6 +110,14 @@ pub struct Editor {
     at: usize,
     pub title: String,
 
+    /// Physical pixels per point in the capture. A screenshot is in physical
+    /// pixels and egui lays out in points, so drawing it one-for-one made every
+    /// capture from a Retina panel appear at twice its real size.
+    density: f32,
+    /// Multiplier on top of fitting. 1.0 is "as large as the window allows,
+    /// never enlarged"; the buttons and Ctrl+scroll move it from there.
+    zoom: f32,
+
     tool: Tool,
     colour: egui::Color32,
     width: f32,
@@ -135,7 +146,7 @@ const SWATCHES: [egui::Color32; 8] = [
 ];
 
 impl Editor {
-    pub fn new(image: RgbaImage, title: String) -> Self {
+    pub fn new(image: RgbaImage, title: String, density: f32) -> Self {
         let image = Arc::new(image);
         Self {
             history: vec![Snapshot {
@@ -148,6 +159,8 @@ impl Editor {
             shapes: Vec::new(),
             at: 0,
             title,
+            density: if density > 0.0 { density } else { 1.0 },
+            zoom: 1.0,
             tool: Tool::Rect,
             colour: SWATCHES[0],
             width: 3.0,
@@ -248,12 +261,22 @@ impl Editor {
     }
 
     fn save(&mut self) {
-        match capture::save_image(&self.composite(), &self.title) {
+        let image = self.composite();
+        match capture::save_image(&image, &self.title) {
             Ok(path) => {
-                self.status = Some(format!(
+                let mut message = format!(
                     "saved {}",
                     path.file_name().unwrap_or_default().to_string_lossy()
-                ));
+                );
+                // Saving and copying are usually wanted together, so one click
+                // can do both rather than needing Save then Copy.
+                if settings::get().copy_image_on_save {
+                    match capture::copy_to_clipboard(&image) {
+                        Ok(()) => message.push_str(" and copied"),
+                        Err(err) => message = format!("{message}, but could not copy: {err}"),
+                    }
+                }
+                self.status = Some(message);
                 self.done = true;
             }
             Err(err) => self.status = Some(err),
@@ -373,6 +396,20 @@ impl Editor {
             }
             ui.checkbox(&mut self.filled, "fill");
             ui.separator();
+            if ui.button("-").on_hover_text("Zoom out").clicked() {
+                self.zoom = (self.zoom / 1.25).max(0.1);
+            }
+            if ui
+                .button(format!("{}%", (self.zoom * 100.0).round()))
+                .on_hover_text("Reset zoom to fit")
+                .clicked()
+            {
+                self.zoom = 1.0;
+            }
+            if ui.button("+").on_hover_text("Zoom in").clicked() {
+                self.zoom = (self.zoom * 1.25).min(8.0);
+            }
+            ui.separator();
             if ui.button("Undo").clicked() {
                 self.undo();
             }
@@ -402,11 +439,28 @@ impl Editor {
 
         egui::TopBottomPanel::top("tools").show(ctx, |ui| self.toolbar(ui));
 
+        let zoom_delta = ctx.input(|i| {
+            if i.modifiers.command || i.modifiers.ctrl {
+                i.raw_scroll_delta.y
+            } else {
+                0.0
+            }
+        });
+        if zoom_delta != 0.0 {
+            self.zoom = (self.zoom * (1.0 + zoom_delta / 400.0)).clamp(0.1, 8.0);
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_size();
             let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
-            // Fit, never enlarge: a small capture stays its own size.
-            let scale = (available.x / iw).min(available.y / ih).min(1.0).max(0.05);
+            // A capture is physical pixels; this panel is points. Dividing by
+            // the density is what makes it appear at the size it was on screen
+            // rather than twice that on a Retina panel.
+            let natural = 1.0 / self.density;
+            // Shrink to fit, never enlarge on its own. Growing is the zoom
+            // control's job, not something that should happen by surprise.
+            let fit = (available.x / iw).min(available.y / ih).min(natural);
+            let scale = (fit * self.zoom).clamp(0.02, 8.0);
             let size = egui::vec2(iw * scale, ih * scale);
 
             let (screen, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -558,7 +612,7 @@ mod tests {
     use super::*;
 
     fn editor(width: u32, height: u32) -> Editor {
-        Editor::new(RgbaImage::new(width, height), "test".into())
+        Editor::new(RgbaImage::new(width, height), "test".into(), 1.0)
     }
 
     #[test]
