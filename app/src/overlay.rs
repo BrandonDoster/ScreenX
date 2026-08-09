@@ -16,6 +16,23 @@ pub enum Outcome {
 /// The smallest drag that counts, in points. Below this it was a stray click.
 const MIN_SIZE: f32 = 4.0;
 
+/// How far short of the screen the overlay window stops, in points.
+///
+/// A window that matches the display exactly is the one thing DWM will hand an
+/// independent flip, and moving in and out of that path re-syncs the panel. It
+/// flickered the whole screen twice per capture: once as the overlay appeared,
+/// and again about 27 seconds after the window was destroyed — long after the
+/// process had exited, which is what made it so hard to place.
+///
+/// One point short does not qualify for the path and neither flicker happens.
+/// Measured on a 5120x1440 144 Hz panel. It is not a VRR effect and not a clock
+/// transition: the flicker survived turning VRR off, and the GPU sat at P8/405
+/// MHz, unchanged, for thirteen seconds either side of it.
+///
+/// `Overlay::update` snaps a drag that reaches the bottom edge back out to the
+/// full height, so the row this costs is not actually lost.
+pub const INSET: f32 = 1.0;
+
 pub struct Overlay {
     shot: MonitorShot,
     texture: egui::TextureHandle,
@@ -72,6 +89,22 @@ impl Overlay {
         }
     }
 
+    /// A drag that reaches the bottom of the overlay means the bottom of the
+    /// screen.
+    ///
+    /// The window stops `INSET` short of the display, so without this the last
+    /// row of pixels could never be selected — you would drag as far down as
+    /// the screen goes and still miss it.
+    fn reaching_the_edge(selection: egui::Rect, screen: egui::Rect, full_height: u32) -> Rect {
+        let mut rect = Self::to_points(selection);
+        // Half a point of slack: the pointer reports in floats and the drag
+        // stops wherever it stopped, not exactly on the edge.
+        if selection.max.y >= screen.max.y - 0.5 {
+            rect.height = full_height.saturating_sub(rect.y.max(0) as u32);
+        }
+        rect
+    }
+
     /// Draws a frame and reports an outcome once there is one.
     pub fn update(&mut self, ctx: &egui::Context) -> Option<Outcome> {
         let mut outcome = None;
@@ -94,7 +127,11 @@ impl Overlay {
                 if response.drag_stopped() {
                     if let Some(sel) = self.selection {
                         if sel.width() >= MIN_SIZE && sel.height() >= MIN_SIZE {
-                            outcome = Some(Outcome::Selected(Self::to_points(sel)));
+                            outcome = Some(Outcome::Selected(Self::reaching_the_edge(
+                                sel,
+                                screen,
+                                self.shot.bounds.height,
+                            )));
                         }
                     }
                     self.drag_start = None;
@@ -184,6 +221,37 @@ mod tests {
                 height: 80
             }
         );
+    }
+
+    /// A 1440-tall screen with the overlay one point short of it.
+    fn screen() -> egui::Rect {
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(5120.0, 1440.0 - INSET))
+    }
+
+    #[test]
+    fn a_drag_to_the_bottom_edge_reaches_the_bottom_of_the_screen() {
+        // The overlay stops a point short, so without the snap the last row of
+        // the display could never be selected.
+        let dragged = egui::Rect::from_min_max(egui::pos2(10.0, 100.0), egui::pos2(200.0, 1439.0));
+        let rect = Overlay::reaching_the_edge(dragged, screen(), 1440);
+        assert_eq!(rect.bottom(), 1440, "a drag to the edge must include the last row");
+    }
+
+    #[test]
+    fn a_drag_that_stops_short_is_left_alone() {
+        let dragged = egui::Rect::from_min_max(egui::pos2(10.0, 100.0), egui::pos2(200.0, 900.0));
+        let rect = Overlay::reaching_the_edge(dragged, screen(), 1440);
+        assert_eq!(rect.bottom(), 900, "only the bottom edge snaps");
+        assert_eq!(rect.height, 800);
+    }
+
+    #[test]
+    fn the_snap_cannot_produce_a_negative_height() {
+        // A drag starting below the screen is nonsense, but it must not wrap
+        // around into an enormous unsigned height.
+        let dragged = egui::Rect::from_min_max(egui::pos2(10.0, 2000.0), egui::pos2(200.0, 2100.0));
+        let rect = Overlay::reaching_the_edge(dragged, screen(), 1440);
+        assert_eq!(rect.height, 0);
     }
 
     #[test]

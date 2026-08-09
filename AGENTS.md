@@ -20,7 +20,7 @@ egui interface**. There is no webview, no HTML and no JavaScript. Fully offline
   tray, shortcuts, settings, and no renderer at all. `screenx-capture`
   (`app/src/main.rs`) is spawned per screenshot and exits when the editor
   closes. Read "The split" below before assuming either is the whole app.
-- 23 core tests, 22 capture tests, 3 listener tests. All must stay green.
+- 23 core tests, 25 capture tests, 3 listener tests. All must stay green.
 - `src-tauri/` and `ui/` are the **previous webview build**, kept only until the
   native one has been used for a while. Do not add to them.
 
@@ -53,11 +53,11 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | File | Lines | Holds |
 | --- | ---: | --- |
 | `app/src/editor.rs` | 669 | Editor state, tools, history, toolbar, canvas input |
-| `app/src/main.rs` | 723 | `screenx-capture`: one screenshot's overlay, editor and window lifecycle, then exit |
+| `app/src/main.rs` | 819 | `screenx-capture`: one screenshot's overlay, editor and window lifecycle, then exit |
 | `app/src/listener.rs` | 247 | `screenx`: tray, shortcuts, and spawning the worker. No renderer |
 | `app/src/render.rs` | 366 | Shapes drawn twice: onto the saved image, and on screen |
 | `app/src/edits.rs` | 227 | Crop, cut out, blur, pixelate — the edits that rewrite pixels |
-| `app/src/overlay.rs` | 207 | Selection overlay |
+| `app/src/overlay.rs` | 275 | Selection overlay, and the one-point inset that stops the panel flickering |
 | `app/src/tray.rs` | 101 | Menu bar icon and the paths it opens |
 | `app/build.rs` | 20 | Links the Windows icon resource. Windows host only |
 | `core/src/capture.rs` | 528 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
@@ -77,17 +77,17 @@ compile it, never copy from it, never commit it.** It is gitignored.
 | Add a filename token | `core/src/naming.rs` — `TOKENS` array (**longest first**) and `expand()`, then the README table |
 | Add an editor tool | `app/src/editor.rs` — `Tool` enum (39) and `Tool::ALL` (61), a case in the drag or click handler in `ui()` (437), then **both** functions in `render.rs`. Read invariant 5 |
 | Add a shape | `app/src/editor.rs` `Shape` (79), then `draw_shapes_into` (render.rs 215) **and** `draw_on_screen` (render.rs 268) |
-| Change what happens after a capture | `app/src/main.rs` — `deliver()` (136) |
-| Change region selection behaviour | `app/src/overlay.rs` — `update()` |
+| Change what happens after a capture | `app/src/main.rs` — `deliver()` (154) |
+| Change region selection behaviour | `app/src/overlay.rs` — `update()`. The overlay size lives in `main.rs` `begin_region`; read invariant 14a before changing it |
 | Change the tray menu | `app/src/tray.rs` — `build()` (66), then the `MenuEvent` arms in `listener.rs` `poll()` (85). Read invariant 17 |
 | Change hotkey parsing | `app/src/listener.rs` — `parse_hotkey()` (151). Read invariant 3 |
 | Start or stop a screenshot | `app/src/listener.rs` — `spawn()` (58) |
-| Show or hide the window | `app/src/main.rs` — `open_editor` (153), `begin_region` (96), `go_idle` (192). Read invariants 6, 14 and 15 |
-| Change the Windows taskbar button | `app/src/main.rs` — `mod taskbar` (252). Read invariant 16 |
-| Move the editor window | `app/src/main.rs` — `editor_position()` (391) |
+| Show or hide the window | `app/src/main.rs` — `open_editor` (172), `begin_region` (105), `go_idle` (211). Read invariants 6, 14 and 15 |
+| Change the Windows taskbar button | `app/src/main.rs` — `mod taskbar` (271). Read invariant 16 |
+| Move the editor window | `app/src/main.rs` — `editor_position()` (410) |
 | Read the screen | `core/src/capture.rs` — `capture_primary()` (208). `capture_monitors()` (218) reads every display and is only for the old webview build |
 | Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (297). Read invariant 1 |
-| Measure memory | `app/src/main.rs` — `memcheck()` (483) |
+| Measure memory | `app/src/main.rs` — `memcheck()` (502) |
 
 ---
 
@@ -183,6 +183,22 @@ worker never idles, and the listener has no window at all — but the rule stand
 for anything that reintroduces a hidden-but-live window.
 `ViewportBuilder::with_visible(false)` also does not hold on Windows, which is
 why the first frame sets the geometry rather than trusting the builder.
+
+**14a. The overlay is one point short of the screen, on purpose.** A window that
+matches the display exactly is the one thing DWM will hand an independent flip,
+and moving in and out of that path re-syncs the panel. It flickered the whole
+screen twice per capture: once as the overlay appeared, and again about 27
+seconds after the window was destroyed — long after the process had exited,
+which is what made it so hard to attribute. `overlay::INSET` is the point that
+avoids it, and `Overlay::reaching_the_edge` snaps a drag that reaches the bottom
+back out to the full height so the row is not lost.
+
+Do not "tidy" this by making the overlay the full screen size. Three wrong
+answers were ruled out with measurement first, and they are recorded so nobody
+pays for them twice: it is not a GPU clock transition (the clocks sat at
+P8/405 MHz, unchanged, for thirteen seconds either side of the flicker), it is
+not VRR (the flicker survived turning VRR off), and it is not a mode or topology
+change (resolution, refresh and adapter list were identical across 780 samples).
 
 **15. `ViewportCommand::Focus` goes last.** winit applies a window level change
 as an asynchronous `SetWindowPos` carrying `SWP_NOACTIVATE`. Sent after a focus

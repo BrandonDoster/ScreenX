@@ -110,9 +110,12 @@ impl App {
             bounds.x as f32,
             bounds.y as f32,
         )));
+        // Deliberately not the full height. See `overlay::INSET`: a window that
+        // matches the display exactly gets an independent flip, and moving in
+        // and out of that path flickered the whole panel.
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
             bounds.width as f32,
-            bounds.height as f32,
+            bounds.height as f32 - overlay::INSET,
         )));
         raise_and_activate(ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));

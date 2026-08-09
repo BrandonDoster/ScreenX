@@ -416,6 +416,36 @@ editor window was last left, and the auto-increment counter, which was already
 there. A second overlay is prevented by the listener holding the child handle
 rather than by a `Mode`, since the state now lives in another process.
 
+### The overlay stops one point short of the screen
+
+Every capture flickered the whole panel twice: once as the overlay appeared, and
+once roughly 27 seconds after it was dismissed. The second one was the difficult
+part, because by then the capture process had been gone for half a minute and
+nothing obvious connected the two.
+
+A window whose size matches the display exactly is the one thing DWM will hand
+an independent flip. Entering that path and leaving it re-syncs the panel.
+Making the overlay one point shorter takes it out of the path and both flickers
+stop. `Overlay::reaching_the_edge` snaps a drag that reaches the bottom edge
+back out to the full height, so the row that costs is not actually lost.
+
+Three other explanations were measured and rejected before this one, recorded
+here because each looked plausible and each was wrong:
+
+- **Not a GPU clock transition.** The memory clock does collapse from 10501 MHz
+  to 405 MHz after a capture, which looked convincing. But it finishes about
+  four seconds after the process exits, and the flicker is at twenty-seven — the
+  clocks were flat at P8/405 for thirteen seconds either side of it.
+- **Not VRR.** The flicker survived turning it off. It was quieter, not absent.
+- **Not a mode or topology change.** Resolution, refresh rate and the adapter
+  list were byte-identical across 780 samples spanning five captures. A virtual
+  display adapter was present throughout and never re-enumerated.
+
+The lesson worth keeping is about the shape of the search rather than the
+answer. A symptom half a minute downstream of its cause invites a timer-shaped
+theory, and two of the three rejected explanations were chosen because their
+timing sounded about right rather than because anything had been measured.
+
 ### Idle memory on Windows
 
 Private working set starts around 42 MB, rises while the overlay is up, and
@@ -440,7 +470,7 @@ single process.
 
 ## 14. Tests
 
-Two `cargo test` suites: 23 in `core/`, and 25 in `app/` — 22 for the capture
+Two `cargo test` suites: 23 in `core/`, and 28 in `app/` — 25 for the capture
 worker and 3 for the listener.
 
 `core/` covers filename patterns, settings round-trips, rectangle maths,
