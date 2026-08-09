@@ -11,7 +11,10 @@
 //! A winit event loop can only be run once per process on macOS, so the design
 //! is not optional: the app is persistent and the overlay is a state it enters.
 
+mod edits;
+mod editor;
 mod overlay;
+mod render;
 mod tray;
 
 use std::sync::mpsc::{Receiver, Sender};
@@ -24,6 +27,7 @@ use global_hotkey::{
 use screenx_core::{capture, settings};
 use tray_icon::{menu::MenuEvent, TrayIconEvent};
 
+use editor::Editor;
 use overlay::{Outcome, Overlay};
 
 /// Something asked for a capture. Sent from the tray and hotkey threads.
@@ -39,6 +43,7 @@ enum Mode {
     /// Hidden, waiting for a hotkey.
     Idle,
     Selecting(Overlay),
+    Editing(Box<Editor>),
 }
 
 struct App {
@@ -100,12 +105,10 @@ impl App {
     }
 
     /// Capture a whole monitor and save it, with no overlay in between.
-    fn capture_fullscreen(&mut self, delayed: bool) {
+    fn capture_fullscreen(&mut self, ctx: &egui::Context, delayed: bool) {
         let Some(shot) = self.shoot(delayed) else { return };
-        match capture::save_image(&shot.image, &shot.name) {
-            Ok(path) => self.report(format!("saved {}", path.display())),
-            Err(err) => self.report(err),
-        }
+        let (image, name) = (shot.image, shot.name);
+        self.deliver(ctx, image, name);
     }
 
     /// Read the screen and enter the overlay.
@@ -142,13 +145,52 @@ impl App {
         let Some(image) = capture::crop_to_rect(overlay.shot(), &rect) else {
             return self.report("that selection was too small to capture".into());
         };
-        match capture::save_image(&image, &overlay.shot().name) {
-            Ok(path) => self.report(format!(
-                "saved {}",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            )),
-            Err(err) => self.report(err),
+        self.deliver(ctx, image, overlay.shot().name.clone());
+    }
+
+    /// What happens to a finished capture, per the settings file.
+    fn deliver(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String) {
+        match settings::get().after_capture.as_str() {
+            "editor" => self.open_editor(ctx, image, title),
+            "clipboard" => self.report(match capture::copy_to_clipboard(&image) {
+                Ok(()) => "copied".into(),
+                Err(err) => err,
+            }),
+            _ => match capture::save_image(&image, &title) {
+                Ok(path) => self.report(format!(
+                    "saved {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                )),
+                Err(err) => self.report(err),
+            },
         }
+    }
+
+    fn open_editor(&mut self, ctx: &egui::Context, image: image::RgbaImage, title: String) {
+        let (width, height) = (image.width() as f32, image.height() as f32);
+        self.mode = Mode::Editing(Box::new(Editor::new(image, title)));
+
+        // Leave room for the toolbar without running off the screen.
+        let bounds = capture::monitor_bounds();
+        let (max_w, max_h) = bounds
+            .first()
+            .map(|b| (b.width as f32 * 0.95, b.height as f32 * 0.88))
+            .unwrap_or((1400.0, 900.0));
+        let scale = (max_w / width).min(max_h / height).min(1.0);
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            (width * scale).max(560.0),
+            (height * scale).max(360.0) + 72.0,
+        )));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title("ScreenX Editor".into()));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        raise_normal();
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+            bounds.first().map(|b| b.x as f32 + 40.0).unwrap_or(80.0),
+            bounds.first().map(|b| b.y as f32 + 40.0).unwrap_or(80.0),
+        )));
     }
 
     fn report(&mut self, message: String) {
@@ -176,16 +218,27 @@ impl eframe::App for App {
                 }
                 Request::Fullscreen { delayed } => {
                     if matches!(self.mode, Mode::Idle) {
-                        self.capture_fullscreen(delayed);
+                        self.capture_fullscreen(ctx, delayed);
                     }
                 }
             }
         }
 
-        if let Mode::Selecting(selection) = &mut self.mode {
-            if let Some(outcome) = selection.update(ctx) {
-                self.end_selection(ctx, outcome);
+        match &mut self.mode {
+            Mode::Selecting(selection) => {
+                if let Some(outcome) = selection.update(ctx) {
+                    self.end_selection(ctx, outcome);
+                }
             }
+            Mode::Editing(editor) => {
+                editor.ui(ctx);
+                if editor.done {
+                    self.mode = Mode::Idle;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(false));
+                }
+            }
+            Mode::Idle => {}
         }
     }
 }
@@ -215,8 +268,28 @@ fn raise_and_activate() {
     }
 }
 
+/// The editor is an ordinary window, so it must come back below the menu bar.
+#[cfg(target_os = "macos")]
+fn raise_normal() {
+    use objc2_app_kit::{NSApplication, NSWindow};
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+    for window in app.windows().iter() {
+        let window: &NSWindow = &window;
+        window.setLevel(0);
+        window.makeKeyAndOrderFront(None);
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn raise_and_activate() {}
+
+#[cfg(not(target_os = "macos"))]
+fn raise_normal() {}
 
 /// Parse the configured accelerator, e.g. `Control+Shift+Q`.
 ///
@@ -283,6 +356,27 @@ fn memcheck(size: (u32, u32), seconds: u64) -> eframe::Result<()> {
         ..Default::default()
     };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    if std::env::args().any(|a| a == "--editor") {
+        // The editor holds the image, its texture and the history, which is the
+        // combination worth measuring — the overlay only ever holds one frame.
+        let image = shot.image.clone();
+        return eframe::run_native(
+            "ScreenX memcheck",
+            eframe::NativeOptions::default(),
+            Box::new(move |_cc| {
+                let mut editor = editor::Editor::new(image, "memcheck".into());
+                Ok(Box::new(Held {
+                    draw: Box::new(move |ctx| {
+                        editor.ui(ctx);
+                        ctx.request_repaint();
+                        if std::time::Instant::now() >= deadline {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    }),
+                }))
+            }),
+        );
+    }
     eframe::run_native(
         "ScreenX memcheck",
         options,

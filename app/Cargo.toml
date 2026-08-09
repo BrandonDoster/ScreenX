@@ -20,6 +20,10 @@ egui = "0.29"
 # Both are the crates Tauri's own plugins wrap, minus the plugin layer.
 tray-icon = "0.19"
 global-hotkey = "0.6"
+# Glyph outlines for text drawn into the saved image. The geometry is a few
+# dozen lines here rather than a rasterisation crate, and the font is the one
+# egui already embeds.
+ab_glyph = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
