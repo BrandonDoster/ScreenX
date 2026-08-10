@@ -41,9 +41,16 @@ else
 fi
 
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$built/screenx$suffix" "$app/Contents/MacOS/screenx"
 cp "$built/screenx-capture$suffix" "$app/Contents/MacOS/screenx-capture"
+
+# The Dock, Finder and the .dmg window read CFBundleIconFile out of an .icns in
+# Resources. Nothing generates one, and a bundle without it gets the blank
+# default document icon — which looks like a broken build rather than a missing
+# file. The Windows half of this is app/build.rs, reading the .ico from the same
+# folder.
+cp "$root/src-tauri/icons/icon.icns" "$app/Contents/Resources/icon.icns"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -51,6 +58,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key><string>screenx</string>
+  <key>CFBundleIconFile</key><string>icon.icns</string>
   <key>CFBundleIdentifier</key><string>com.screenx.native</string>
   <key>CFBundleName</key><string>ScreenX</string>
   <key>CFBundlePackageType</key><string>APPL</string>

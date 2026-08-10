@@ -349,7 +349,7 @@ cargo run -p screenx --bin screenx
 ./app/bundle.sh          # macOS .app, ad-hoc signed
 ```
 
-`bundle.sh` writes the smallest bundle macOS will accept. Three parts of it
+`bundle.sh` writes the smallest bundle macOS will accept. Four parts of it
 matter:
 
 **Both binaries.** `Contents/MacOS/` holds `screenx` and `screenx-capture`, and
@@ -376,6 +376,13 @@ leaves it unsigned. `--deep` is deprecated for exactly this.
 **`LSUIElement`.** A capture tool belongs in the menu bar, not the Dock. It is
 also the condition the overlay has to work under; see the activation note in
 section 6.
+
+**The icon.** `Contents/Resources/icon.icns` and a `CFBundleIconFile` key, both
+written by `bundle.sh`. Nothing generates an `.icns`, so the file is the one in
+`src-tauri/icons/` — the same folder `app/build.rs` takes the Windows `.ico`
+from. Without them the bundle gets the blank default document icon in Finder,
+the `.dmg` window and Applications, which reads as a broken build rather than a
+missing file. `LSUIElement` hides the Dock icon, not this one.
 
 Windows has no equivalent script. It does not need one: the release job builds
 the two executables, puts them in `ScreenX_windows.zip` so they cannot be
