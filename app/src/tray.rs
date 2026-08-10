@@ -16,7 +16,7 @@ use tray_icon::{
 };
 
 /// 32px is what both platforms ask for; macOS scales it for Retina itself.
-const ICON: &[u8] = include_bytes!("../../src-tauri/icons/32x32.png");
+const ICON: &[u8] = include_bytes!("../../assets/icon-32.png");
 
 fn icon() -> Option<Icon> {
     let image = image::load_from_memory(ICON).ok()?.into_rgba8();

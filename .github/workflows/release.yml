@@ -19,9 +19,28 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat > notes.md <<'EOF'
-          **macOS.** Download `ScreenX_universal.dmg` below. Open it and drag
-          `ScreenX.app` onto the Applications folder. The build is not signed by
-          Apple, so macOS blocks a copy you download. Remove the mark one time:
+          **macOS, with Homebrew.** The shortest way. Both extra parts are
+          needed: Homebrew refuses a cask from a tap outside its own list until
+          you trust the tap, and `--no-quarantine` keeps it from marking a build
+          Apple has not signed — the mark is what makes macOS refuse to open
+          ScreenX and offer to move it to the Trash.
+
+          ```sh
+          brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
+          brew trust --cask brandondoster/screenx/screenx
+          brew install --cask --no-quarantine screenx
+          ```
+
+          Already installed and blocked? Remove the mark and start it again:
+
+          ```sh
+          xattr -dr com.apple.quarantine /Applications/ScreenX.app
+          ```
+
+          **macOS, from the .dmg.** Download `ScreenX_universal.dmg` below. Open
+          it and drag `ScreenX.app` onto the Applications folder. The build is
+          not signed by Apple, so macOS blocks a copy you download. Remove the
+          mark one time:
 
           ```sh
           xattr -dr com.apple.quarantine /Applications/ScreenX.app

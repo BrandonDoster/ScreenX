@@ -34,18 +34,34 @@ screenshots.
 
 ### macOS
 
-Use [Homebrew](https://brew.sh). This is the shortest way, and ScreenX starts
-with no warning.
+Use [Homebrew](https://brew.sh). This is the shortest way.
 
 ```sh
 brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
-brew install --cask screenx
+brew trust --cask brandondoster/screenx/screenx
+brew install --cask --no-quarantine screenx
 ```
+
+Both extra parts are necessary. Homebrew refuses a cask from a tap outside its
+own list until you trust that tap, and stops with **Refusing to load cask ...
+from untrusted tap**. `--no-quarantine` is for the next step: ScreenX is not
+signed by Apple, and Homebrew marks what it downloads, so macOS refuses to open
+the application and offers to move it to the Trash.
+
+You trust the tap one time only. Use `--no-quarantine` for each install and
+each upgrade.
 
 To get a later version:
 
 ```sh
-brew upgrade --cask screenx
+brew upgrade --cask --no-quarantine screenx
+```
+
+**If macOS already refused to open ScreenX**, the mark is on the copy you
+installed. Remove it, then start ScreenX again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/ScreenX.app
 ```
 
 **From the .dmg instead.** Download `ScreenX_universal.dmg` from the
@@ -63,8 +79,6 @@ xattr -dr com.apple.quarantine /Applications/ScreenX.app
 ScreenX is not signed by Apple, so macOS blocks a copy that you download. The
 command removes the block. ScreenX now starts normally. You do this one time
 only.
-
-Homebrew does not need this command. It removes the block for you.
 
 ### Windows
 
@@ -383,6 +397,22 @@ These are the defaults. Change them in the settings file.
 ---
 
 ## If something does not work
+
+### macOS says it cannot verify ScreenX
+
+macOS shows **"ScreenX" Not Opened** and says Apple could not verify ScreenX is
+free of malware. ScreenX is not signed by Apple, and macOS marks applications
+that you download.
+
+**Click Done. Do not click Move to Trash**, although it is the highlighted
+button. Then remove the mark and start ScreenX again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/ScreenX.app
+```
+
+To prevent the mark, install with Homebrew and `--no-quarantine`. See
+[Install](#install).
 
 ### My screenshots are blank or black
 

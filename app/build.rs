@@ -11,9 +11,9 @@
 fn main() {
     #[cfg(windows)]
     {
-        println!("cargo:rerun-if-changed=../src-tauri/icons/icon.ico");
+        println!("cargo:rerun-if-changed=../assets/icon.ico");
         winresource::WindowsResource::new()
-            .set_icon("../src-tauri/icons/icon.ico")
+            .set_icon("../assets/icon.ico")
             .compile()
             .expect("could not link the Windows icon resource");
     }

@@ -50,7 +50,7 @@ cp "$built/screenx-capture$suffix" "$app/Contents/MacOS/screenx-capture"
 # default document icon — which looks like a broken build rather than a missing
 # file. The Windows half of this is app/build.rs, reading the .ico from the same
 # folder.
-cp "$root/src-tauri/icons/icon.icns" "$app/Contents/Resources/icon.icns"
+cp "$root/assets/icon.icns" "$app/Contents/Resources/icon.icns"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
