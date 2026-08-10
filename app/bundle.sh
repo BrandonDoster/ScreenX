@@ -52,6 +52,20 @@ cp "$built/screenx-capture$suffix" "$app/Contents/MacOS/screenx-capture"
 # folder.
 cp "$root/assets/icon.icns" "$app/Contents/Resources/icon.icns"
 
+# Both binaries link several hundred crates, and MIT and Apache-2.0 each ask
+# that their copyright notices travel with every copy. This is how they travel
+# on macOS. It is generated rather than committed, so it is absent until it is
+# made — and refusing to build is deliberate, because a bundle that quietly
+# ships without the notices is the thing this file is here to prevent.
+notices="$root/THIRD-PARTY-LICENSES.html"
+if [ ! -f "$notices" ]; then
+    echo "missing $notices — generate it first:" >&2
+    echo "  cargo install cargo-about --features cli" >&2
+    echo "  cargo about generate --manifest-path app/Cargo.toml app/about.hbs -o THIRD-PARTY-LICENSES.html" >&2
+    exit 1
+fi
+cp "$notices" "$app/Contents/Resources/THIRD-PARTY-LICENSES.html"
+
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

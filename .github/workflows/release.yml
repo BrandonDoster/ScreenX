@@ -38,8 +38,9 @@ jobs:
           Security** > **Screen Recording**, then take the screenshot again.
 
           **Windows.** Download `ScreenX_windows.zip` and extract it. There is
-          no installer. Keep both files in the same folder and run
-          `screenx.exe`.
+          no installer. Keep `screenx.exe` and `screenx-capture.exe` in the same
+          folder and run `screenx.exe`. The third file is the licence notices
+          for the libraries ScreenX is built from, and nothing reads it.
 
           ScreenX is two programs. `screenx.exe` holds the tray icon and the
           shortcuts, and it starts `screenx-capture.exe` beside it for each
@@ -74,6 +75,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-targets }}
+
+      # MIT and Apache-2.0 each ask that their copyright notices travel with the
+      # binary, and the two released binaries statically link several hundred
+      # crates. The file is generated here rather than committed: a checked-in
+      # copy goes stale the first time a dependency moves, and a stale notice
+      # file is the same failure as no notice file. `install-action` downloads a
+      # prebuilt cargo-about rather than compiling it, so this costs seconds.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      - name: Collect the third-party licence notices
+        run: cargo about generate --manifest-path app/Cargo.toml app/about.hbs -o THIRD-PARTY-LICENSES.html
 
       # No Rust cache here on purpose. This workflow only runs on tags, and an
       # Actions cache is readable from the ref that wrote it, its children, and
@@ -113,6 +127,7 @@ jobs:
           # its own path, so a download carrying only screenx.exe has a tray
           # icon and two shortcuts that do nothing at all.
           $files = 'app/target/release/screenx.exe',
-                   'app/target/release/screenx-capture.exe'
+                   'app/target/release/screenx-capture.exe',
+                   'THIRD-PARTY-LICENSES.html'
           Compress-Archive -Force -Path $files -DestinationPath ScreenX_windows.zip
           gh release upload "${{ github.ref_name }}" ScreenX_windows.zip --clobber

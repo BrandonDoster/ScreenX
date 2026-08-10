@@ -1,0 +1,55 @@
+# Inputs for `cargo about generate`, which writes THIRD-PARTY-LICENSES.html.
+#
+# The released binary statically links several hundred crates, and the permissive
+# licences they carry — MIT above all — require their copyright notices to travel
+# with every copy. That file is how they travel.
+#
+# It is generated during the release and never committed. A checked-in copy goes
+# stale the first time a dependency moves and nobody notices, and a stale notice
+# file is the same failure as no notice file.
+#
+# Generated from `app` alone. It builds both released binaries, and `core` is a
+# path dependency of it, so its tree already covers everything that ships.
+
+# The three targets the release builds for. Anything reachable only from another
+# platform — the UEFI and Android crates, mostly — is not linked into what users
+# get, so it is not listed.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+# Our own crates are GPL-3.0-only and are the subject of the file, not entries
+# in it.
+private = { ignore = true }
+
+# Test-only code is never in a release. Build dependencies stay: `winresource`
+# runs at build time, but the resources it compiles do end up in the binary.
+ignore-dev-dependencies = true
+
+# Ordered by preference: for a crate offering a choice, `cargo about` takes the
+# first of these it is offered. MIT leads because it is the plain one, and the
+# fewest distinct texts make the shortest file.
+#
+# All of these are compatible with GPL-3.0-only. Apache-2.0 is one-way
+# compatible, which is part of why this project is version 3 and not 2. MPL-2.0
+# is compatible under its own section 3.3. OFL-1.1 and the Ubuntu Font Licence
+# cover the fonts egui embeds; see the note at the end of README.md.
+accepted = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+    "Unlicense",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "OFL-1.1",
+]

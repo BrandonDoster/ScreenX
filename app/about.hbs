@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ScreenX — third-party licences</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 50rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+h3 { margin-top: 2.5rem; border-top: 1px solid #ccc; padding-top: 1.5rem; }
+ul { padding-left: 1.25rem; }
+.license-used-by { columns: 3; font-size: 0.85rem; }
+.license-text { white-space: pre-wrap; font-size: 0.8rem; background: #f6f6f6; padding: 1rem; }
+</style>
+</head>
+<body>
+<h1>Third-party licences</h1>
+
+<p>ScreenX is one static binary, so the libraries below are compiled into it.
+Each is listed under the licence it is used on, with the full text of that
+licence. ScreenX itself is under the GNU General Public License version 3; these
+libraries are not, and keep their own terms.</p>
+
+<p>The fonts are the notable case: Ubuntu Light is under the Ubuntu Font Licence,
+Noto Emoji under the SIL Open Font Licence. Both allow embedding, and neither
+allows release under another licence, so both stay under their own.</p>
+
+<h2>Licences used</h2>
+<ul>
+{{#each overview}}
+    <li><a href="#{{id}}">{{name}}</a> — {{count}}</li>
+{{/each}}
+</ul>
+
+<h2>Full text</h2>
+{{#each licenses}}
+<h3 id="{{id}}">{{name}}</h3>
+<h4>Used by</h4>
+<ul class="license-used-by">
+{{#each used_by}}
+    <li><a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a></li>
+{{/each}}
+</ul>
+<pre class="license-text">{{text}}</pre>
+{{/each}}
+</body>
+</html>

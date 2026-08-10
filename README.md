@@ -60,9 +60,12 @@ installer.
 2. Keep `screenx.exe` and `screenx-capture.exe` in the same folder.
 3. Run `screenx.exe`.
 
-**Keep the two files together.** `screenx.exe` starts `screenx-capture.exe` from
-the folder that it is in. Your shortcuts do nothing if you move one file without
-the other.
+The .zip also holds `THIRD-PARTY-LICENSES.html`, which lists the libraries
+ScreenX is built from. Nothing reads it and you can delete it.
+
+**Keep the two programs together.** `screenx.exe` starts `screenx-capture.exe`
+from the folder that it is in. Your shortcuts do nothing if you move one file
+without the other.
 
 The application is not signed. Windows shows a blue **Windows protected your
 PC** window the first time. To continue:
@@ -490,3 +493,36 @@ ScreenX is free software. You can share it and change it under the terms of the
 GNU General Public License, version 3. See [`LICENSE`](LICENSE).
 
 ScreenX has no warranty.
+
+### Third-party code
+
+ScreenX draws its own window and contains no browser, so the libraries it is
+built from are compiled into the two binaries rather than loaded from your
+system. They are all under permissive licences — MIT for most, then Apache-2.0,
+BSD, ISC, Zlib, MPL-2.0 and a few others — and every one of those licences asks
+that its copyright notice travel with each copy.
+
+`THIRD-PARTY-LICENSES.html` is where they travel. It is built during the release
+rather than kept in this repository, because a checked-in copy goes stale the
+first time a dependency moves. Every release ships it: inside the .zip on
+Windows, and inside the bundle on macOS at `ScreenX.app/Contents/Resources/`.
+
+To read it without downloading a release, or after changing a dependency:
+
+```sh
+cargo install cargo-about --features cli
+cargo about generate --manifest-path app/Cargo.toml app/about.hbs \
+    -o THIRD-PARTY-LICENSES.html
+```
+
+What goes in it is set by [`app/about.toml`](app/about.toml), and how it reads
+by [`app/about.hbs`](app/about.hbs).
+
+**The fonts are not under the GPL.** Text drawn onto a screenshot is rendered
+with Ubuntu Light, which egui embeds and which is under the Ubuntu Font Licence
+1.0. That licence allows the font to be embedded and redistributed, but does not
+allow it to be released under any other licence, so it keeps its own. The same
+holds for the other fonts egui carries: Hack under the MIT licence, and Noto
+Emoji under the SIL Open Font Licence 1.1. All of them are free software, none
+of them is covered by ScreenX's GPL-3.0, and the full text of each is in
+`THIRD-PARTY-LICENSES.html`.

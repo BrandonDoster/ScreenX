@@ -8,3 +8,6 @@ reference/
 target/
 app/target/
 core/target/
+
+# Written by `cargo about` during the release, and by hand when checking it.
+THIRD-PARTY-LICENSES.html
