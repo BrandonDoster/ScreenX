@@ -1,6 +1,6 @@
 cask "screenx" do
-  version "0.3.0"
-  sha256 "d69fcc42a5d785dea5dee5fcbc799367983d17f74678966a899b85c64f640f2b"
+  version "1.0.0"
+  sha256 "28006f8f7defc647871551b0b0bdc185e34c1a1f9185219a12c4ee9c453ed41e"
 
   url "https://github.com/BrandonDoster/ScreenX/releases/download/v#{version}/ScreenX_universal.dmg"
   name "ScreenX"
