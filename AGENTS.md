@@ -65,7 +65,12 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | `core/src/settings.rs` | 237 | The single JSON settings file |
 
 `reference/` holds third-party source for behavioural comparison. **Never
-compile it, never copy from it, never commit it.** It is gitignored.
+compile it, never copy from it, never commit it.** It is gitignored — and
+gitignore does not cover a path that is already tracked, which is how
+`reference/ShareX` sat in the index as a submodule gitlink with no `.gitmodules`
+from the first commit until `v1.0.0-rc.2`. It made `actions/checkout` fail its
+cleanup step with `exit code 128` on every job of every release, which reads as
+a broken build. Check `git ls-files -s | awk '$1=="160000"'` returns nothing.
 
 ---
 
@@ -316,6 +321,32 @@ canvas, a missing `ctx.filter` — do not exist here.
 
 What is still not covered by a test: anything needing a real screen. Window
 level, key focus, activation and the tray icon are checked by running it.
+
+### Verifying a macOS build by hand
+
+**Launch it the way a user launches it, or the result is meaningless.** This
+cost most of a session. A worker started from a terminal inherits the
+*terminal's* Screen Recording grant, so an unauthorised build takes correct
+screenshots and every check passes. The failure only appears under `open -a` or
+a double click in Finder, where no granted parent is in the chain.
+
+```sh
+pkill -f 'ScreenX.app/Contents/MacOS'   # a stale copy holds the shortcuts
+open -a app/target/ScreenX.app          # not ./Contents/MacOS/screenx
+```
+
+Then press the shortcut and look at the overlay. **A dimmed desktop with no
+windows in it is the denial**, not an empty screen — see invariant 20. The
+correct overlay shows your real windows, dimmed.
+
+A grant does not follow a build. TCC keys on path and code hash, so a rebuild,
+a move, or installing to `/Applications` is a new identity and prompts again.
+An old bundle that still holds the grant proves nothing about the new one.
+
+Two more things that make a run lie: a previous `screenx` still running owns the
+global shortcuts, so the new one silently registers nothing; and the overlay
+takes a moment to appear, so a screenshot taken too early shows no overlay and
+looks like a failure to launch.
 
 ---
 

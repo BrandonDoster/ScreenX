@@ -176,7 +176,7 @@ impl Overlay {
                         painter.rect_stroke(
                             sel,
                             0.0,
-                            egui::Stroke::new(1.0, egui::Color32::from_rgb(0x3d, 0x8b, 0xfd)),
+                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x3d, 0x8b, 0xfd)),
                         );
                         painter.text(
                             sel.left_top() + egui::vec2(2.0, -4.0),

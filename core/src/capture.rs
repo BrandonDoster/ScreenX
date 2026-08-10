@@ -137,7 +137,7 @@ fn display_image(display_id: u32) -> Result<RgbaImage, String> {
 
     let image = CGDisplayCreateImage(display_id)
         .ok_or("could not read the display; check Screen Recording permission")?;
-    let image = unsafe { image.as_ref() };
+    let image = image.as_ref();
 
     let width = CGImage::width(Some(image));
     let height = CGImage::height(Some(image));

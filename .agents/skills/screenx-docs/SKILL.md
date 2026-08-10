@@ -1,6 +1,6 @@
 ---
 name: screenx-docs
-description: Write and update ScreenX documentation - the user README, docs/TECHNICAL.md, and AGENTS.md - and regenerate the screenshots in docs/images with the --docshots debug mode. Use when editing any of those files, adding a screenshot, adding a feature that needs documenting, or when asked about documentation style, ASD-STE100 wording, or how the synthetic screenshots are produced.
+description: Write and update ScreenX documentation - the user README, docs/TECHNICAL.md, and AGENTS.md - and the screenshots in docs/images. Also carries the pre-release checklist and the list of files that need a version bump. Use when editing any of those files, adding a screenshot, adding a feature that needs documenting, cutting a release or tagging one, or when asked about documentation style, ASD-STE100 wording, or which files carry the version.
 ---
 
 # ScreenX documentation
@@ -102,74 +102,61 @@ open. This is the highest-value section; keep it accurate.
 breaks and how it presents. An invariant that is not a real past bug is just
 opinion and should not be in the list.
 
-Line numbers go stale. After editing Rust or `ui/`, re-verify them:
+Line numbers go stale. After editing any Rust, re-verify them:
 
 ```sh
-grep -nE "^(pub )?(async )?fn |^(pub )?struct |^const " src-tauri/src/*.rs
-grep -n "const TOOLS\|invoke_handler" ui/editor.js src-tauri/src/lib.rs
+wc -l app/src/*.rs core/src/*.rs app/build.rs
+grep -nE "^(pub )?fn |^(pub )?struct |^const |^enum |^pub enum " app/src/*.rs core/src/*.rs
 ```
 
-Update the counts in the file map and the "Orientation" bullet (test totals,
-bundle size) whenever they change.
+Update the counts in the file map and the "Orientation" bullet (test totals)
+whenever they change. Editing a file near its top moves every anchor below it,
+so re-derive the numbers rather than adjusting the ones you remember changing.
 
 ---
 
 ## 4. Screenshots
 
-### Regenerate them
+**There is no generator. They are taken by hand, with ScreenX.**
 
-```sh
-npm run docshots
-```
+The webview build had a `--docshots` mode that drew a mock window and shot it
+unattended. It lived in `src-tauri/` and did not survive the rewrite, so
+`npm run docshots` and every `npm` script are dead — they still drive the
+retired build. Do not resurrect the mode for one picture; the three images in
+`docs/images/` took less time to take than the mode took to describe.
 
-This runs the debug-only mode in `src-tauri/src/docshots.rs`. It writes
-`docs/images/editor.png`, `settings.png` and `settings-hotkeys.png`, then exits.
-A watchdog kills the process after 30 seconds so it can never leave windows on
-screen.
+Current images: `editor.png`, `overlay.png`, `tray-menu.png`.
 
-Debug builds only — the module is behind `#[cfg(debug_assertions)]` and is not
-in a release bundle.
+### Take one — a job for a human, not an agent
 
-### How it works
+Every image is a photograph of somebody's real desktop, and only the person at
+the machine can see what is on it. An agent asks for the picture and leaves the
+placeholder below until it arrives.
 
-1. `sample_image()` **draws a mock application window from scratch** with
-   `fill()` rectangles: a title bar with traffic lights, a sidebar with a
-   selected row, heading and paragraph bars, and a white panel to blur. It is
-   about 900x560. Nothing is captured from the real screen.
-2. That image is encoded, put in `State.frames`, and an editor window is opened
-   with it through the normal payload path — the same path a real capture uses.
-3. After the window loads, Rust calls `window.eval(...)` to push annotation
-   objects straight into the editor's `shapes` array through the `window.__editor`
-   hook that the tests already use, then calls `render()`. No production code
-   knows about the screenshot mode.
-4. `shoot(title, file)` finds the window by title with `xcap::Window::all()` and
-   captures it with the app's own capture code.
+1. Put something on screen that is safe to publish. Check it against the privacy
+   rules below; the old generator enforced them and nothing does now.
+2. Run ScreenX and capture the thing you want to show.
+3. Save it into `docs/images/` under the existing name.
+4. Reference it in the README with descriptive alt text.
+
+The overlay and the tray menu can only be photographed, not generated: the
+overlay must show real windows to mean anything, and the tray menu is drawn by
+the OS.
 
 ### Two privacy rules — do not remove them
 
-**Never capture the real desktop.** The editor screenshot uses the drawn mock
-window. If you need a new screenshot of content, extend `sample_image()`.
+These used to be enforced by the generator. Nothing enforces them now, so they
+are the reason to look at an image twice before committing it.
 
-**Substitute identifying values before shooting.** The settings screenshot
-replaces the home path with `/Users/you/...` through `eval`, and the hotkeys tab
-shows the shipped defaults rather than whatever this machine has bound. Both are
-**display-only** — no stored setting is written. Look at the `eval` blocks in
-`docshots.rs` before adding a screenshot of any screen that shows a path, a user
-name or machine-specific configuration.
+**Publish nothing private.** Every image in `docs/images/` is a photograph of a
+real desktop. Read what is in the window, the tab bar, the sidebar and the
+notification area before you save it.
 
-### Add a new screenshot
+**Substitute identifying values.** No home path with a real user name, no
+machine-specific configuration, no shortcut that is not the shipped default.
+`/Users/you/...` is the form the documentation already uses.
 
-1. Open the window in `docshots::run()`, with a payload if it needs one.
-2. If it shows anything machine-specific, `eval` a neutral value over it first.
-3. Call `shoot("Exact Window Title", "name.png")`. The title must match the
-   window title exactly.
-4. Reference it in the README with descriptive alt text.
-
-### Screenshots that cannot be generated
-
-Some shots need a real desktop — the selection overlay must show real windows,
-and the tray menu is an OS-drawn menu. Do not fake these. Leave a placeholder
-the user can fill:
+### The placeholder to leave
 
 ```markdown
 > **PLACEHOLDER — screenshot: `docs/images/overlay.png`**
@@ -196,8 +183,9 @@ below has actually diverged at least once.
 | --- | --- |
 | What works on each platform, and what is unverified | `README.md` "What is not here yet"; `docs/TECHNICAL.md` platform sections; `AGENTS.md` "Platform notes" |
 | Anything a release produces | Nowhere. Do not write artifact sizes down — see [Figures](#figures) |
-| Test and self-check counts | `docs/TECHNICAL.md` section 13; `AGENTS.md` "Orientation" |
-| Version number | `package.json`; `src-tauri/Cargo.toml`; `src-tauri/Cargo.lock`; `src-tauri/tauri.conf.json`; installer filenames in `README.md` |
+| Test counts | `docs/TECHNICAL.md` section 14; `AGENTS.md` "Orientation" |
+| Version number | Four files, and they must agree. See [Releasing](#7-releasing) |
+| Release artifact names | `.github/workflows/release.yml` (build steps *and* the notes heredoc); `Casks/screenx.rb`; `README.md` install steps |
 | An invariant | `AGENTS.md` numbered list; `docs/TECHNICAL.md` "Things that will bite you" |
 | Source file line counts and anchors | `AGENTS.md` file map and "Where do I change X?" |
 
@@ -217,21 +205,22 @@ file gets fixed and the other two read as prose you already skimmed.
 
 Run the checks; do not recall the numbers.
 
+Nothing here uses `npm`. Every `npm` script in `package.json` still drives the
+retired `src-tauri/` build, and all of them are wrong for this tree.
+
 ```sh
-# Counts. Compare against AGENTS.md "Orientation" and TECHNICAL.md section 13.
-node --test --test-reporter=tap tests/*.test.mjs | grep '^# tests'
-cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | grep 'test result'
-npm run selfcheck            # count the "ok"/"FAIL" lines; that is the total
+# Counts. Compare against AGENTS.md "Orientation" and TECHNICAL.md section 14.
+cargo test --manifest-path core/Cargo.toml 2>&1 | grep 'test result'
+cargo test --manifest-path app/Cargo.toml 2>&1 | grep 'test result'
 
 # Line counts and anchors for the AGENTS.md file map and its tables.
-wc -l src-tauri/src/*.rs ui/*.js tests/*.mjs
-grep -nE "^(pub )?(async )?fn |^(pub )?struct |^const |^pub static " src-tauri/src/*.rs
-grep -n "const TOOLS\|invoke_handler" ui/editor.js src-tauri/src/lib.rs
+wc -l app/src/*.rs core/src/*.rs app/build.rs
+grep -nE "^(pub )?fn |^(pub )?struct |^const |^enum |^pub enum " app/src/*.rs core/src/*.rs
 
 # Version agreement across every file that carries it.
-grep -o '"version": "[^"]*"' package.json src-tauri/tauri.conf.json
-grep -m1 '^version' src-tauri/Cargo.toml
-grep -oE 'ScreenX_[0-9]+\.[0-9]+\.[0-9]+' README.md | sort -u
+grep -m1 '^version' app/Cargo.toml core/Cargo.toml
+grep -m1 -A1 'name = "screenx"' app/Cargo.lock
+grep -m1 '^  version' Casks/screenx.rb
 
 # Image references. Every "placeholder" must be a labelled blockquote, not a
 # broken image tag.
@@ -264,10 +253,77 @@ Behavioural constants are the exception and stay exact: a default of 400 ms, a
 
 ### Claims about what works
 
-Anything the docs say is verified must name how. If you fixed something a stub
-could not catch, `npm run selfcheck` should gain a line for it, and that is what
-the docs point at. A claim with no check behind it is the one that goes stale
-without anyone noticing.
+Anything the docs say is verified must name how. A claim with no check behind it
+is the one that goes stale without anyone noticing. There is no `selfcheck` any
+more — it belonged to the webview build — so a claim points at a `cargo test`
+case, or at the sentence saying it was checked by hand and on what.
+
+---
+
+## 7. Releasing
+
+**Run this section before every tag.** Not after, and not "when something looks
+wrong": a tag is public the moment it is pushed, and the release workflow fires
+on it.
+
+### Bump the version in four places, and they must agree
+
+| File | How |
+| --- | --- |
+| `app/Cargo.toml` | Edit `version` |
+| `core/Cargo.toml` | Edit `version` — the two crates are released together |
+| `app/Cargo.lock` | Not by hand. `cargo build` rewrites it |
+| `core/Cargo.lock` | Not by hand. Needs its **own** build — see below |
+
+`app/Cargo.lock` carries `screenx` and `screenx-core`; `core/Cargo.lock` carries
+only `screenx-core`. They are separate lockfiles, so building the app updates
+one and leaves the other stale. A stale lockfile is not caught by any test.
+
+```sh
+cargo build --release --manifest-path app/Cargo.toml
+cargo build --manifest-path core/Cargo.toml
+```
+
+`Casks/screenx.rb` also carries a version, but **do not edit it**. The workflow
+rewrites it and commits to master, and only for a tag with no `-` in it, so a
+release candidate never becomes the `brew` version. Editing it by hand fights
+the workflow.
+
+`app/bundle.sh` reads the version out of `app/Cargo.toml` rather than repeating
+it. It was written there once and was still `0.3.0` long after the crate moved
+on, which is why it is derived now. Do not reintroduce a literal.
+
+```sh
+# Everything that carries the version, in one place. All must match.
+grep -m1 '^version' app/Cargo.toml core/Cargo.toml
+grep -A1 -E 'name = "screenx(-core)?"' app/Cargo.lock core/Cargo.lock | grep version
+```
+
+### Then, in order
+
+1. `cargo test` both manifests. Green, and **no warnings** — a warning that says
+   "will become a hard error in a future release" is a countdown, not noise.
+2. `./app/bundle.sh` and check the bundle: `Contents/MacOS/` holds **both**
+   `screenx` and `screenx-capture`, and `codesign --verify --strict` passes.
+3. Verify by hand on macOS the way `AGENTS.md` "Verifying a macOS build by hand"
+   says — launched with `open -a`, never from a terminal.
+4. Re-read the README install steps against what the workflow actually uploads.
+   Artifact names live in three files and have drifted before: the README
+   described a `.dmg` for months while the workflow produced only a `.zip`.
+5. Check the tree is clean of things that break `actions/checkout`:
+   `git ls-files -s | awk '$1=="160000"'` must print nothing.
+6. Tag, push, and **then read the run log** — not just its green tick. A job can
+   succeed with warnings that matter:
+   `gh run view <id> --log | grep -iE '##\[(error|warning)\]|^warning'`
+7. Download what was published and open it. The workflow succeeding is not
+   evidence the artifact is right.
+
+### The release notes are documentation
+
+They live in the `notes.md` heredoc inside `.github/workflows/release.yml`, and
+nothing else validates them. They are the install instructions most people
+actually read, so they follow the README's register — ASD-STE100, one
+instruction per sentence — and they must name the current artifacts.
 
 ---
 

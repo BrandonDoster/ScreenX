@@ -169,9 +169,19 @@ the Screen Recording list and shows the system prompt; the grant only reaches
 the process on its next launch, so the run that asks returns an error instead
 of an image. There is nothing useful it could return.
 
-This is easy to test wrongly. Started from a terminal the worker inherits the
-terminal's grant and everything looks correct; the failure only appears when the
-application is started the way a user starts it.
+This is easy to test wrongly, and it cost most of a session. Started from a
+terminal the worker inherits the *terminal's* grant, so an unauthorised build
+takes correct screenshots and every check passes. The failure only appears under
+`open -a` or a double click, where no granted parent is in the chain.
+
+The denial has a specific look. It is not a black or empty screen: the overlay
+comes up over a dimmed **desktop picture with no windows on it**, which is easy
+to read as a rendering fault instead of a permission one.
+
+A grant also does not follow a build. TCC keys on the path and the code hash, so
+a rebuild, a move, or an install into `/Applications` is a new identity and
+prompts again. An older bundle that still holds the grant says nothing about the
+new one — testing against it is the second way to get a false pass.
 
 ---
 

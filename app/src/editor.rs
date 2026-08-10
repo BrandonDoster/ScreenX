@@ -383,7 +383,7 @@ impl Editor {
                 ui.painter().rect_filled(rect, 3.0, swatch);
                 if self.colour == swatch {
                     ui.painter()
-                        .rect_stroke(rect, 3.0, egui::Stroke::new(2.0, egui::Color32::GRAY));
+                        .rect_stroke(rect, 3.0, egui::Stroke::new(2.0_f32, egui::Color32::GRAY));
                 }
                 if response.clicked() {
                     self.colour = swatch;
