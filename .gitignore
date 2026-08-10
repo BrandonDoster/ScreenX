@@ -13,3 +13,6 @@ target/
 app/target/
 core/target/
 src-tauri/gen/
+
+# Scratch list for the cleanup session. Local only.
+cleanup.md
