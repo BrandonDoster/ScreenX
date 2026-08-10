@@ -155,6 +155,24 @@ async and several hundred lines of bridging. It still works, so the port waits
 until it does not. This is the one piece of the program with a known expiry
 date.
 
+### The permission is asked for, not discovered
+
+`CGDisplayCreateImage` does not fail without the Screen Recording grant. It
+succeeds and returns the desktop picture with every window missing — so an
+unauthorised ScreenX saved a photograph of the wallpaper and looked broken
+rather than unauthorised. The overlay showed the same thing, which is the
+clearest way to see it: a dimmed desktop with no windows on it.
+
+`display_image` therefore calls `CGPreflightScreenCaptureAccess` first, and
+`CGRequestScreenCaptureAccess` when that is false. The request adds ScreenX to
+the Screen Recording list and shows the system prompt; the grant only reaches
+the process on its next launch, so the run that asks returns an error instead
+of an image. There is nothing useful it could return.
+
+This is easy to test wrongly. Started from a terminal the worker inherits the
+terminal's grant and everything looks correct; the failure only appears when the
+application is started the way a user starts it.
+
 ---
 
 ## 6. The selection overlay
@@ -317,25 +335,42 @@ charging every capture for it made the ordinary one feel slow.
 ## 13. Building
 
 ```sh
-cargo run -p screenx
+cargo run -p screenx --bin screenx
 ./app/bundle.sh          # macOS .app, ad-hoc signed
 ```
 
-`bundle.sh` writes the smallest bundle macOS will accept. Two parts of it
+`bundle.sh` writes the smallest bundle macOS will accept. Three parts of it
 matter:
+
+**Both binaries.** `Contents/MacOS/` holds `screenx` and `screenx-capture`, and
+the release ships them together. The listener resolves the worker from
+`current_exe`, so a bundle with only the listener in it has a working tray icon
+and two shortcuts that do nothing at all — which reads as a refused Screen
+Recording permission and is not one. The same applies to the Windows archive,
+which is why it is an archive rather than a bare `.exe`.
+
+Placing the worker beside the listener is also what gives it an identity.
+`CFBundleGetMainBundle` walks up from the executable path, so a helper directly
+inside `Contents/MacOS/` gets the enclosing bundle's `Info.plist` — its
+`LSUIElement`, and its name in the permission prompt. The macOS dialog says
+"ScreenX", not "screenx-capture", and one grant covers both processes.
 
 **Ad-hoc signing.** Screen Recording permission is granted to a bundle with a
 stable code signature, not to a loose binary — run from a terminal, the
-permission is attributed to the terminal instead. Ad-hoc signing keeps the
-identity stable across rebuilds so the grant is not given again every time.
+permission is attributed to the terminal instead, which is the trap when testing
+this. Ad-hoc signing keeps the identity stable across rebuilds so the grant is
+not given again every time. The worker is signed first and the bundle second:
+it is nested code, and sealing the bundle over an unsigned nested executable
+leaves it unsigned. `--deep` is deprecated for exactly this.
 
 **`LSUIElement`.** A capture tool belongs in the menu bar, not the Dock. It is
 also the condition the overlay has to work under; see the activation note in
 section 6.
 
 Windows has no equivalent script. It does not need one: the release job builds
-`screenx.exe` and ships that single file, and nothing about Screen Recording
-permission applies. What Windows does need is `app/build.rs`, which links the
+the two executables, puts them in `ScreenX_windows.zip` so they cannot be
+downloaded apart, and nothing about Screen Recording permission applies. What
+Windows does need is `app/build.rs`, which links the
 `RT_GROUP_ICON` resource that Explorer, Alt-Tab and the taskbar read out of the
 binary. `tauri-build` supplied that for the webview build and the native one had
 no replacement, so the executable shipped with a blank icon. winit falls back to
@@ -506,23 +541,35 @@ that happened.
 4. macOS captures must read the framebuffer, not a window list, or the menu bar
    goes missing.
 5. A shape is drawn twice and both must agree.
-6. The window's close button must not quit the program.
-7. Going idle shrinks the window as well as hiding it.
+6. Closing the editor must not take the tray with it. The split satisfies this
+   by construction; a merge back brings the `CancelClose` with it.
+7. Retired by the split: going idle had to shrink the window as well as hide
+   it. Reinstate it if anything makes the worker persist.
 8. The capture's density travels with it into the editor.
 9. Fitting shrinks, never enlarges.
 10. Editor history is bounded by bytes, not steps.
 11. Blur and pixelate must destroy pixels; test against high-frequency detail.
 12. Pointer input is clamped to the image.
 13. An accessory app must activate, not merely take focus.
-14. On Windows the window is parked, never hidden, or the event loop stops and
-    the shortcut goes unanswered.
+14. On Windows a window is never hidden and then expected to run, or the event
+    loop stops and the shortcut goes unanswered.
+14a. The overlay is one point short of the screen. An exact match takes DWM's
+    independent flip path and re-syncs the whole panel.
 15. `ViewportCommand::Focus` is sent last; anything reordering the window
     afterwards carries `SWP_NOACTIVATE` and cancels it.
 16. Window styles are not set behind winit's back; it rewrites the extended
     style wholesale.
 17. The tray menu needs `tray-icon` 0.24 or newer, or no menu item does
     anything on Windows.
-18. A quit must not be swallowed by the editor's `CancelClose`.
+18. Retired by the split: a quit must not be swallowed by the editor's
+    `CancelClose`. It returns with any merge back.
+19. A release ships both programs or neither. The listener resolves the worker
+    from its own path, and a package carrying only the listener has a tray icon
+    and two shortcuts that do nothing.
+20. macOS refuses a screen capture silently. Without the Screen Recording grant
+    `CGDisplayCreateImage` returns the desktop picture with every window
+    missing, so the permission is asked for before the read rather than
+    diagnosed after it.
 
 ---
 

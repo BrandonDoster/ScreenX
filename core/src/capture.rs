@@ -114,7 +114,26 @@ const RAW_IS_PHYSICAL: bool = cfg!(windows);
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
 fn display_image(display_id: u32) -> Result<RgbaImage, String> {
-    use objc2_core_graphics::{CGDataProvider, CGDisplayCreateImage, CGImage};
+    use objc2_core_graphics::{
+        CGDataProvider, CGDisplayCreateImage, CGImage, CGPreflightScreenCaptureAccess,
+        CGRequestScreenCaptureAccess,
+    };
+
+    // Without the Screen Recording grant `CGDisplayCreateImage` does not fail.
+    // It returns the desktop picture with every window missing, so the app
+    // looks broken rather than unauthorised, and the screenshot it saves is a
+    // photograph of the wallpaper. Ask instead of finding out afterwards.
+    //
+    // The request only puts ScreenX in the Screen Recording list and shows the
+    // system prompt; the grant reaches this process on its next launch, so
+    // there is nothing worth returning on the run that asks.
+    if !CGPreflightScreenCaptureAccess() {
+        CGRequestScreenCaptureAccess();
+        return Err("ScreenX needs Screen Recording permission. Grant it in System \
+                    Settings > Privacy & Security > Screen Recording, then take the \
+                    screenshot again."
+            .into());
+    }
 
     let image = CGDisplayCreateImage(display_id)
         .ok_or("could not read the display; check Screen Recording permission")?;

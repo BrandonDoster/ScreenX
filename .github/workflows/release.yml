@@ -19,18 +19,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat > notes.md <<'EOF'
-          **macOS.** Download `ScreenX_universal.zip` below. Move `ScreenX.app`
-          into your Applications folder. The build is not signed by Apple, so
-          macOS blocks a copy you download. Remove the mark one time:
+          **macOS.** Download `ScreenX_universal.dmg` below. Open it and drag
+          `ScreenX.app` onto the Applications folder. The build is not signed by
+          Apple, so macOS blocks a copy you download. Remove the mark one time:
 
           ```sh
           xattr -dr com.apple.quarantine /Applications/ScreenX.app
           ```
 
-          Then give ScreenX permission in **System Settings** > **Privacy &
-          Security** > **Screen Recording**.
+          ScreenX asks for Screen Recording permission the first time you take a
+          screenshot. Turn on **ScreenX** in **System Settings** > **Privacy &
+          Security** > **Screen Recording**, then take the screenshot again.
 
-          **Windows.** Download `screenx.exe` and run it. There is no installer.
+          **Windows.** Download `ScreenX_windows.zip` and extract it. There is
+          no installer. Keep both files in the same folder and run
+          `screenx.exe`.
+
+          ScreenX is two programs. `screenx.exe` holds the tray icon and the
+          shortcuts, and it starts `screenx-capture.exe` beside it for each
+          screenshot. Separate the two files and the shortcuts do nothing.
+
           Windows shows **Windows protected your PC**: click **More info**, then
           **Run anyway**.
 
@@ -79,8 +87,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./app/bundle.sh --universal
-          ditto -c -k --keepParent 'app/target/ScreenX.app' ScreenX_universal.zip
-          gh release upload "${{ github.ref_name }}" ScreenX_universal.zip --clobber
+          # A .dmg rather than a plain archive: it carries the Applications
+          # symlink, so installing is one drag and the user never has to be told
+          # where the application goes. Homebrew reads a dmg just as well.
+          staging=$(mktemp -d)
+          cp -R 'app/target/ScreenX.app' "$staging/"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname ScreenX -srcfolder "$staging" \
+            -ov -format UDZO ScreenX_universal.dmg
+          gh release upload "${{ github.ref_name }}" ScreenX_universal.dmg --clobber
 
       - name: Build the Windows binary
         if: runner.os == 'Windows'
@@ -88,7 +103,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cargo build --release --manifest-path app/Cargo.toml
-          gh release upload "${{ github.ref_name }}" app/target/release/screenx.exe --clobber
+          # Both programs in one archive. The listener resolves the worker from
+          # its own path, so a download carrying only screenx.exe has a tray
+          # icon and two shortcuts that do nothing at all.
+          $files = 'app/target/release/screenx.exe',
+                   'app/target/release/screenx-capture.exe'
+          Compress-Archive -Force -Path $files -DestinationPath ScreenX_windows.zip
+          gh release upload "${{ github.ref_name }}" ScreenX_windows.zip --clobber
 
       # The cask lives in this repository rather than a homebrew-tap one, so
       # the bump needs no cross-repository token. Users pay for that with the
@@ -98,7 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          sha=$(shasum -a 256 ScreenX_universal.zip | cut -d' ' -f1)
+          sha=$(shasum -a 256 ScreenX_universal.dmg | cut -d' ' -f1)
           # actions/checkout leaves a detached HEAD at the tag with no local
           # master, so fetch it into one before switching.
           git fetch origin master:master

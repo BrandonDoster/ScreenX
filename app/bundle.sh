@@ -19,22 +19,31 @@ manifest="$root/app/Cargo.toml"
 # was still 0.3.0 after the crate moved on.
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$manifest" | head -1)
 
+# Both programs, not one. The listener resolves screenx-capture from its own
+# path, so a bundle missing the worker has a tray icon and shortcuts that do
+# nothing at all — which reads as a denied Screen Recording permission and is
+# not one.
 mkdir -p "$root/app/target"
 if [ "$1" = "--universal" ]; then
     cargo build --release --manifest-path "$manifest" --target aarch64-apple-darwin
     cargo build --release --manifest-path "$manifest" --target x86_64-apple-darwin
-    lipo -create -output "$root/app/target/screenx-universal" \
-        "$root/app/target/aarch64-apple-darwin/release/screenx" \
-        "$root/app/target/x86_64-apple-darwin/release/screenx"
-    binary="$root/app/target/screenx-universal"
+    for name in screenx screenx-capture; do
+        lipo -create -output "$root/app/target/$name-universal" \
+            "$root/app/target/aarch64-apple-darwin/release/$name" \
+            "$root/app/target/x86_64-apple-darwin/release/$name"
+    done
+    suffix="-universal"
+    built="$root/app/target"
 else
     cargo build --release --manifest-path "$manifest"
-    binary="$root/app/target/release/screenx"
+    suffix=""
+    built="$root/app/target/release"
 fi
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
-cp "$binary" "$app/Contents/MacOS/screenx"
+cp "$built/screenx$suffix" "$app/Contents/MacOS/screenx"
+cp "$built/screenx-capture$suffix" "$app/Contents/MacOS/screenx-capture"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -55,5 +64,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$app"
+# Inside out. The worker is nested code, and sealing the bundle over an unsigned
+# nested executable leaves it unsigned; --deep is deprecated for exactly this.
+codesign --force --sign - "$app/Contents/MacOS/screenx-capture"
+codesign --force --sign - "$app"
 echo "built $app"

@@ -28,15 +28,37 @@ browser.
 ## Install
 
 > **This version is a release candidate.** ScreenX has been rewritten. It does
-> not use a web browser engine any more. There is no installer for it yet. To
-> use it, build it. See [For developers](#for-developers).
+> not use a web browser engine any more.
 >
-> The instructions below install version 0.3.0. That is the last version with an
-> installer, and it is the older build.
+> Download it from the
+> [releases page](https://github.com/BrandonDoster/ScreenX/releases). Homebrew
+> still installs version 0.3.0, which is the older build. Homebrew gets the new
+> version at the first full release.
+
+ScreenX is two programs. One program gives you the tray icon and the keyboard
+shortcuts. It starts the second program for each screenshot, and the second
+program stops when you close the editor. This keeps the memory low between
+screenshots.
 
 ### macOS
 
-Use [Homebrew](https://brew.sh). ScreenX starts with no warning.
+Download `ScreenX_universal.dmg` from the releases page.
+
+1. Open the .dmg file.
+2. Drag **ScreenX** onto the **Applications** folder.
+3. Open Terminal.
+4. Run the command below.
+
+```sh
+xattr -dr com.apple.quarantine /Applications/ScreenX.app
+```
+
+ScreenX is not signed by Apple, so macOS blocks a copy that you download. The
+command removes the block. ScreenX now starts normally. You do this one time
+only.
+
+**With Homebrew instead.** This gives you version 0.3.0 until the first full
+release.
 
 ```sh
 brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
@@ -49,23 +71,17 @@ To get a later version:
 brew upgrade --cask screenx
 ```
 
-**From the .dmg instead.** ScreenX is not signed by Apple, so macOS blocks a
-copy you download. Open the .dmg, move ScreenX into your Applications folder,
-then run this one command in Terminal:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/ScreenX.app
-```
-
-ScreenX now starts normally. You do this one time only.
-
 ### Windows
 
-Download `screenx.exe` and run it. There is no installer.
+Download `ScreenX_windows.zip` from the releases page. There is no installer.
 
-Put the file where you want to keep it. To remove ScreenX, delete the file.
-Your settings stay in `%APPDATA%\ScreenX`. Delete that folder as well to remove
-them.
+1. Extract the .zip file.
+2. Keep `screenx.exe` and `screenx-capture.exe` in the same folder.
+3. Run `screenx.exe`.
+
+**Keep the two files together.** `screenx.exe` starts `screenx-capture.exe` from
+the folder that it is in. Your shortcuts do nothing if you move one file without
+the other.
 
 The application is not signed. Windows shows a blue **Windows protected your
 PC** window the first time. To continue:
@@ -74,6 +90,9 @@ PC** window the first time. To continue:
 2. Click **Run anyway**.
 
 You do this one time only.
+
+To remove ScreenX, delete the folder. Your settings stay in `%APPDATA%\ScreenX`.
+Delete that folder as well to remove them.
 
 ---
 
@@ -90,13 +109,21 @@ it. Open it from the menu bar icon to change where your screenshots go.
 
 ### macOS asks for permission
 
-macOS must give ScreenX permission to read the screen. If your screenshots are
-blank:
+macOS must give ScreenX permission to read the screen. ScreenX asks you the
+first time that you take a screenshot.
 
-1. Open **System Settings**.
-2. Go to **Privacy & Security** > **Screen Recording**.
-3. Turn on **ScreenX**.
-4. Start ScreenX again.
+1. Click **Open System Settings** in the window that macOS shows.
+2. Turn on **ScreenX** in the **Screen Recording** list.
+3. Take the screenshot again.
+
+ScreenX takes no screenshot until you give the permission. It stops and tells
+you instead.
+
+If you do not see the window, open **System Settings** yourself. Go to
+**Privacy & Security** > **Screen Recording**, then turn on **ScreenX**.
+
+Give the permission to **ScreenX** only. The second program uses the same
+permission as the first.
 
 ---
 
@@ -363,7 +390,8 @@ These are the defaults. Change them in the settings file.
 ### My screenshots are blank or black
 
 **macOS:** give ScreenX permission to read the screen. See
-[macOS asks for permission](#macos-asks-for-permission).
+[macOS asks for permission](#macos-asks-for-permission). Without the
+permission macOS gives ScreenX your desktop picture with no windows in it.
 
 **Windows:** a game in full-screen mode can capture as black. Set the game to
 borderless-window mode.
@@ -373,6 +401,10 @@ borderless-window mode.
 Another application has taken the same combination. Open the settings file from
 the menu bar icon and choose a different combination. ScreenX writes a message
 to its output if the system refuses one.
+
+**On Windows, check the two files first.** `screenx.exe` needs
+`screenx-capture.exe` in the same folder. The tray icon works without it, and
+the shortcuts do nothing.
 
 ### My shortcut does nothing while a menu is open
 
@@ -406,7 +438,7 @@ does not change the saved image.
 Quick start:
 
 ```sh
-cargo run -p screenx                          # run it
+cargo run -p screenx --bin screenx            # run it
 cargo test --manifest-path core/Cargo.toml    # capture, naming and settings
 cargo test --manifest-path app/Cargo.toml     # editor, edits and overlay
 ./app/bundle.sh                               # make the macOS application

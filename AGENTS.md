@@ -60,7 +60,7 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | `app/src/overlay.rs` | 275 | Selection overlay, and the one-point inset that stops the panel flickering |
 | `app/src/tray.rs` | 101 | Menu bar icon and the paths it opens |
 | `app/build.rs` | 20 | Links the Windows icon resource. Windows host only |
-| `core/src/capture.rs` | 528 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
+| `core/src/capture.rs` | 547 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
 | `core/src/naming.rs` | 332 | Filename pattern expansion + its tests |
 | `core/src/settings.rs` | 237 | The single JSON settings file |
 
@@ -85,8 +85,8 @@ compile it, never copy from it, never commit it.** It is gitignored.
 | Show or hide the window | `app/src/main.rs` — `open_editor` (172), `begin_region` (105), `go_idle` (211). Read invariants 6, 14 and 15 |
 | Change the Windows taskbar button | `app/src/main.rs` — `mod taskbar` (271). Read invariant 16 |
 | Move the editor window | `app/src/main.rs` — `editor_position()` (410) |
-| Read the screen | `core/src/capture.rs` — `capture_primary()` (208). `capture_monitors()` (218) reads every display and is only for the old webview build |
-| Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (297). Read invariant 1 |
+| Read the screen | `core/src/capture.rs` — `capture_primary()` (227). `capture_monitors()` (237) reads every display and is only for the old webview build |
+| Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (316). Read invariant 1 |
 | Measure memory | `app/src/main.rs` — `memcheck()` (502) |
 
 ---
@@ -230,6 +230,29 @@ window's close button — so invariant 6's `CancelClose` cancelled the tray's Qu
 too, and the program could not be closed at all while the editor was open.
 `App::quitting` marks the close that must be allowed through.
 
+**19. A release ships both programs or neither.** `listener::worker_path`
+resolves `screenx-capture` from `current_exe`, so a package carrying only the
+listener has a working tray icon, a registered shortcut, and nothing behind it.
+`bundle.sh` copies both into `Contents/MacOS/` and the Windows job zips both,
+because a user who downloads one bare `.exe` gets exactly the same symptom.
+Read it as a permission fault and you will spend the afternoon in System
+Settings — that is how it presented the first time.
+
+Beside the listener is also where the worker gets its identity:
+`CFBundleGetMainBundle` walks up from the executable path, so a helper directly
+in `Contents/MacOS/` inherits the bundle's `Info.plist`, its `LSUIElement`, and
+its name in the permission prompt. The dialog says "ScreenX" and one grant
+covers both processes. Move the worker into a subfolder and that stops being
+true.
+
+**20. macOS refuses a capture silently, so ask before reading.** Without the
+Screen Recording grant `CGDisplayCreateImage` does not fail — it returns the
+desktop picture with every window missing, and ScreenX saved a photograph of
+the wallpaper. `capture::display_image` calls `CGPreflightScreenCaptureAccess`,
+then `CGRequestScreenCaptureAccess`, and returns an error rather than an image:
+the grant only arrives on the next launch. Testing this from a terminal proves
+nothing, because the worker inherits the terminal's grant.
+
 ---
 
 ## Key concepts and vocabulary
@@ -255,9 +278,13 @@ cargo test --manifest-path app/Cargo.toml
 ./app/bundle.sh --universal           # both Apple architectures; what CI ships
 ```
 
-`.github/workflows/release.yml` runs on a `v*` tag. It builds this bundle on
-macOS and `screenx.exe` on Windows, and moves the Homebrew cask only for a tag
-with no `-` in it, so a release candidate never becomes the `brew` version.
+`.github/workflows/release.yml` runs on a `v*` tag. On macOS it runs this
+bundle and wraps it in `ScreenX_universal.dmg`, with the Applications symlink so
+installing is one drag; on Windows it builds both executables into
+`ScreenX_windows.zip`. Read invariant 19 before changing either — both artifacts
+exist to stop the two programs being downloaded apart. The Homebrew cask moves
+only for a tag with no `-` in it, so a release candidate never becomes the
+`brew` version.
 
 Memory is measured, not asserted. `--memcheck WIDTH HEIGHT SECONDS [--editor]`
 stands the overlay or the editor up on a synthetic capture and holds it, so
