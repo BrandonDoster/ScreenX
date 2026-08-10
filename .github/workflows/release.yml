@@ -19,30 +19,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat > notes.md <<'EOF'
-          **macOS, with Homebrew.** All four lines are needed. Homebrew refuses
-          a cask from a tap outside its own list until you trust the tap, and it
-          marks what it downloads — that mark is what makes macOS refuse to open
-          a build Apple has not signed, offering to move it to the Trash.
-
-          ```sh
-          brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
-          brew trust --cask brandondoster/screenx/screenx
-          brew install --cask screenx
-          xattr -dr com.apple.quarantine /Applications/ScreenX.app
-          ```
-
-          Run the last line again after each `brew upgrade --cask screenx`, which
-          brings a new copy and a new mark. `--no-quarantine` used to do this and
-          was removed from Homebrew, so it is no longer an option.
-
-          **macOS, from the .dmg.** Download `ScreenX_universal.dmg` below. Open
-          it and drag `ScreenX.app` onto the Applications folder. The build is
-          not signed by Apple, so macOS blocks a copy you download. Remove the
-          mark one time:
+          **macOS.** Download `ScreenX_universal.dmg` below. Open it and drag
+          `ScreenX.app` onto the Applications folder. Then run this one command:
 
           ```sh
           xattr -dr com.apple.quarantine /Applications/ScreenX.app
           ```
+
+          ScreenX is not signed by Apple, so macOS marks a copy you download and
+          refuses to open it, offering to move it to the Trash instead. The
+          command removes the mark. You do this once per install.
+
+          There is no Homebrew cask. Homebrew is ending support for casks that
+          fail Gatekeeper, and signing needs a paid Apple Developer ID.
 
           ScreenX asks for Screen Recording permission the first time you take a
           screenshot. Turn on **ScreenX** in **System Settings** > **Privacy &
@@ -127,24 +116,3 @@ jobs:
                    'app/target/release/screenx-capture.exe'
           Compress-Archive -Force -Path $files -DestinationPath ScreenX_windows.zip
           gh release upload "${{ github.ref_name }}" ScreenX_windows.zip --clobber
-
-      # The cask lives in this repository rather than a homebrew-tap one, so
-      # the bump needs no cross-repository token. Users pay for that with the
-      # explicit URL in `brew tap`. Pre-releases never move the cask.
-      - name: Point the Homebrew cask at this release
-        if: matrix.platform == 'macos-latest' && !contains(github.ref_name, '-')
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          sha=$(shasum -a 256 ScreenX_universal.dmg | cut -d' ' -f1)
-          # actions/checkout leaves a detached HEAD at the tag with no local
-          # master, so fetch it into one before switching.
-          git fetch origin master:master
-          git checkout master
-          sed -i '' -E "s/^  version \".*\"/  version \"$version\"/" Casks/screenx.rb
-          sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$sha\"/" Casks/screenx.rb
-          git diff --quiet && exit 0
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -am "chore: point the Homebrew cask at $version"
-          git push origin master

@@ -34,34 +34,7 @@ screenshots.
 
 ### macOS
 
-Use [Homebrew](https://brew.sh). This is the shortest way.
-
-```sh
-brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
-brew trust --cask brandondoster/screenx/screenx
-brew install --cask screenx
-xattr -dr com.apple.quarantine /Applications/ScreenX.app
-```
-
-Each line is necessary:
-
-1. The tap is where ScreenX comes from.
-2. Homebrew refuses a cask from a tap outside its own list until you trust that
-   tap. Without this it stops with **Refusing to load cask ... from untrusted
-   tap**. You do this one time only.
-3. This installs ScreenX into your Applications folder.
-4. ScreenX is not signed by Apple, and Homebrew marks what it downloads. macOS
-   refuses to open a marked application. The last line removes the mark.
-
-Run the last line again after each upgrade, because the upgrade brings a new
-copy and a new mark.
-
-```sh
-brew upgrade --cask screenx
-xattr -dr com.apple.quarantine /Applications/ScreenX.app
-```
-
-**From the .dmg instead.** Download `ScreenX_universal.dmg` from the
+Download `ScreenX_universal.dmg` from the
 [releases page](https://github.com/BrandonDoster/ScreenX/releases).
 
 1. Open the .dmg file.
@@ -408,8 +381,7 @@ button. Then remove the mark and start ScreenX again:
 xattr -dr com.apple.quarantine /Applications/ScreenX.app
 ```
 
-Homebrew does not prevent this. It marks what it downloads, so the same command
-applies after an install and after an upgrade. See [Install](#install).
+You do this once for each copy you download. See [Install](#install).
 
 ### My screenshots are blank or black
 
@@ -501,7 +473,11 @@ side is complete.
 
 **A signed application.** The build is unsigned, and there is no plan to sign
 it. An Apple Developer ID costs 99 USD each year, which this project does not
-spend.
+spend. This is why you run one command after you install on macOS.
+
+**A Homebrew cask.** ScreenX had one. Homebrew is ending support for casks that
+do not pass Gatekeeper, and a build passes Gatekeeper only if Apple signs it.
+Install from the .dmg instead.
 
 ---
 

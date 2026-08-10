@@ -288,9 +288,12 @@ cargo test --manifest-path app/Cargo.toml
 bundle and wraps it in `ScreenX_universal.dmg`, with the Applications symlink so
 installing is one drag; on Windows it builds both executables into
 `ScreenX_windows.zip`. Read invariant 19 before changing either — both artifacts
-exist to stop the two programs being downloaded apart. The Homebrew cask moves
-only for a tag with no `-` in it, so a release candidate never becomes the
-`brew` version.
+exist to stop the two programs being downloaded apart.
+
+There is no Homebrew cask any more, and no step that commits back to `master`
+during a release. Do not add one back without reading the commit that removed
+it: Homebrew is ending support for casks that fail Gatekeeper, and passing
+Gatekeeper means a paid Apple Developer ID.
 
 Memory is measured, not asserted. `--memcheck WIDTH HEIGHT SECONDS [--editor]`
 stands the overlay or the editor up on a synthetic capture and holds it, so
