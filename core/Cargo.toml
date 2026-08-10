@@ -1,6 +1,6 @@
 [package]
 name = "screenx-core"
-version = "1.0.0-rc.2"
+version = "1.0.0"
 description = "Capture, filename patterns and settings. No UI, no windowing."
 license = "GPL-3.0-only"
 edition = "2021"

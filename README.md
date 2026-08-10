@@ -27,14 +27,6 @@ browser.
 
 ## Install
 
-> **This version is a release candidate.** ScreenX has been rewritten. It does
-> not use a web browser engine any more.
->
-> Download it from the
-> [releases page](https://github.com/BrandonDoster/ScreenX/releases). Homebrew
-> still installs version 0.3.0, which is the older build. Homebrew gets the new
-> version at the first full release.
-
 ScreenX is two programs. One program gives you the tray icon and the keyboard
 shortcuts. It starts the second program for each screenshot, and the second
 program stops when you close the editor. This keeps the memory low between
@@ -42,7 +34,22 @@ screenshots.
 
 ### macOS
 
-Download `ScreenX_universal.dmg` from the releases page.
+Use [Homebrew](https://brew.sh). This is the shortest way, and ScreenX starts
+with no warning.
+
+```sh
+brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
+brew install --cask screenx
+```
+
+To get a later version:
+
+```sh
+brew upgrade --cask screenx
+```
+
+**From the .dmg instead.** Download `ScreenX_universal.dmg` from the
+[releases page](https://github.com/BrandonDoster/ScreenX/releases).
 
 1. Open the .dmg file.
 2. Drag **ScreenX** onto the **Applications** folder.
@@ -57,23 +64,13 @@ ScreenX is not signed by Apple, so macOS blocks a copy that you download. The
 command removes the block. ScreenX now starts normally. You do this one time
 only.
 
-**With Homebrew instead.** This gives you version 0.3.0 until the first full
-release.
-
-```sh
-brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
-brew install --cask screenx
-```
-
-To get a later version:
-
-```sh
-brew upgrade --cask screenx
-```
+Homebrew does not need this command. It removes the block for you.
 
 ### Windows
 
-Download `ScreenX_windows.zip` from the releases page. There is no installer.
+Download `ScreenX_windows.zip` from the
+[releases page](https://github.com/BrandonDoster/ScreenX/releases). There is no
+installer.
 
 1. Extract the .zip file.
 2. Keep `screenx.exe` and `screenx-capture.exe` in the same folder.

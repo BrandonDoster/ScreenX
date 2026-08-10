@@ -1,6 +1,6 @@
 [package]
 name = "screenx"
-version = "1.0.0-rc.2"
+version = "1.0.0"
 description = "Local screen capture and annotation"
 license = "GPL-3.0-only"
 edition = "2021"
