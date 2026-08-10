@@ -120,10 +120,10 @@ so re-derive the numbers rather than adjusting the ones you remember changing.
 **There is no generator. They are taken by hand, with ScreenX.**
 
 The webview build had a `--docshots` mode that drew a mock window and shot it
-unattended. It lived in `src-tauri/` and did not survive the rewrite, so
-`npm run docshots` and every `npm` script are dead — they still drive the
-retired build. Do not resurrect the mode for one picture; the three images in
-`docs/images/` took less time to take than the mode took to describe.
+unattended. It was deleted with the rest of that build after v1.0.0, along with
+`package.json` and every `npm` script. Do not resurrect the mode for one
+picture; the three images in `docs/images/` took less time to take than the mode
+took to describe.
 
 Current images: `editor.png`, `overlay.png`, `tray-menu.png`.
 
@@ -205,8 +205,8 @@ file gets fixed and the other two read as prose you already skimmed.
 
 Run the checks; do not recall the numbers.
 
-Nothing here uses `npm`. Every `npm` script in `package.json` still drives the
-retired `src-tauri/` build, and all of them are wrong for this tree.
+Nothing here uses `npm`. There is no `package.json` any more — it went with the
+webview build after v1.0.0, so any instruction naming an `npm` script is stale.
 
 ```sh
 # Counts. Compare against AGENTS.md "Orientation" and TECHNICAL.md section 14.

@@ -39,28 +39,25 @@ Use [Homebrew](https://brew.sh). This is the shortest way.
 ```sh
 brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
 brew trust --cask brandondoster/screenx/screenx
-brew install --cask --no-quarantine screenx
+brew install --cask screenx
+xattr -dr com.apple.quarantine /Applications/ScreenX.app
 ```
 
-Both extra parts are necessary. Homebrew refuses a cask from a tap outside its
-own list until you trust that tap, and stops with **Refusing to load cask ...
-from untrusted tap**. `--no-quarantine` is for the next step: ScreenX is not
-signed by Apple, and Homebrew marks what it downloads, so macOS refuses to open
-the application and offers to move it to the Trash.
+Each line is necessary:
 
-You trust the tap one time only. Use `--no-quarantine` for each install and
-each upgrade.
+1. The tap is where ScreenX comes from.
+2. Homebrew refuses a cask from a tap outside its own list until you trust that
+   tap. Without this it stops with **Refusing to load cask ... from untrusted
+   tap**. You do this one time only.
+3. This installs ScreenX into your Applications folder.
+4. ScreenX is not signed by Apple, and Homebrew marks what it downloads. macOS
+   refuses to open a marked application. The last line removes the mark.
 
-To get a later version:
-
-```sh
-brew upgrade --cask --no-quarantine screenx
-```
-
-**If macOS already refused to open ScreenX**, the mark is on the copy you
-installed. Remove it, then start ScreenX again:
+Run the last line again after each upgrade, because the upgrade brings a new
+copy and a new mark.
 
 ```sh
+brew upgrade --cask screenx
 xattr -dr com.apple.quarantine /Applications/ScreenX.app
 ```
 
@@ -411,8 +408,8 @@ button. Then remove the mark and start ScreenX again:
 xattr -dr com.apple.quarantine /Applications/ScreenX.app
 ```
 
-To prevent the mark, install with Homebrew and `--no-quarantine`. See
-[Install](#install).
+Homebrew does not prevent this. It marks what it downloads, so the same command
+applies after an install and after an upgrade. See [Install](#install).
 
 ### My screenshots are blank or black
 

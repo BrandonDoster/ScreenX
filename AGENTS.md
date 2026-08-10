@@ -21,8 +21,9 @@ egui interface**. There is no webview, no HTML and no JavaScript. Fully offline
   (`app/src/main.rs`) is spawned per screenshot and exits when the editor
   closes. Read "The split" below before assuming either is the whole app.
 - 23 core tests, 25 capture tests, 3 listener tests. All must stay green.
-- `src-tauri/` and `ui/` are the **previous webview build**, kept only until the
-  native one has been used for a while. Do not add to them.
+- The webview build is **gone**, removed after v1.0.0. If a comment or a
+  document still mentions `src-tauri/`, `ui/`, `tests/` or an `npm` script, it
+  is stale — say so rather than going looking for the folder.
 
 ### The split
 
@@ -60,7 +61,7 @@ boundary rather than to take a screenshot. `docs/TECHNICAL.md` has the numbers.
 | `app/src/overlay.rs` | 275 | Selection overlay, and the one-point inset that stops the panel flickering |
 | `app/src/tray.rs` | 101 | Menu bar icon and the paths it opens |
 | `app/build.rs` | 20 | Links the Windows icon resource. Windows host only |
-| `core/src/capture.rs` | 547 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
+| `core/src/capture.rs` | 539 | Screen reading, `Rect` maths, coordinate normalisation, encoding, saving |
 | `core/src/naming.rs` | 332 | Filename pattern expansion + its tests |
 | `core/src/settings.rs` | 237 | The single JSON settings file |
 
@@ -90,8 +91,8 @@ a broken build. Check `git ls-files -s | awk '$1=="160000"'` returns nothing.
 | Show or hide the window | `app/src/main.rs` — `open_editor` (172), `begin_region` (105), `go_idle` (211). Read invariants 6, 14 and 15 |
 | Change the Windows taskbar button | `app/src/main.rs` — `mod taskbar` (271). Read invariant 16 |
 | Move the editor window | `app/src/main.rs` — `editor_position()` (410) |
-| Read the screen | `core/src/capture.rs` — `capture_primary()` (227). `capture_monitors()` (237) reads every display and is only for the old webview build |
-| Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (316). Read invariant 1 |
+| Read the screen | `core/src/capture.rs` — `capture_primary()` (227), which reads only the display the capture will use |
+| Touch coordinates | `core/src/capture.rs` — `to_dip()` (86) and `crop_to_rect()` (308). Read invariant 1 |
 | Measure memory | `app/src/main.rs` — `memcheck()` (502) |
 
 ---

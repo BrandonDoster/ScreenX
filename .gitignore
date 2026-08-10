@@ -1,15 +1,10 @@
 CLAUDE.md
 .claude/skills
 reference/
-node_modules/
-dist/
-out/
 *.log
 .DS_Store
 
-# Rust / Tauri build output
-src-tauri/target/
+# Rust build output
 target/
 app/target/
 core/target/
-src-tauri/gen/

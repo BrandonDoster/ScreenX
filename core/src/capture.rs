@@ -234,14 +234,6 @@ pub fn capture_primary() -> Result<MonitorShot, String> {
     shoot(monitor)
 }
 
-pub fn capture_monitors() -> Result<Vec<MonitorShot>, String> {
-    let monitors = xcap::Monitor::all().map_err(|e| format!("could not list monitors: {e}"))?;
-    if monitors.is_empty() {
-        return Err("no monitors found".into());
-    }
-    monitors.iter().map(shoot).collect()
-}
-
 /// Visible windows, front-most first, excluding our own.
 pub fn list_windows() -> Vec<WindowInfo> {
     let windows = match xcap::Window::all() {

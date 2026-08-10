@@ -19,23 +19,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat > notes.md <<'EOF'
-          **macOS, with Homebrew.** The shortest way. Both extra parts are
-          needed: Homebrew refuses a cask from a tap outside its own list until
-          you trust the tap, and `--no-quarantine` keeps it from marking a build
-          Apple has not signed — the mark is what makes macOS refuse to open
-          ScreenX and offer to move it to the Trash.
+          **macOS, with Homebrew.** All four lines are needed. Homebrew refuses
+          a cask from a tap outside its own list until you trust the tap, and it
+          marks what it downloads — that mark is what makes macOS refuse to open
+          a build Apple has not signed, offering to move it to the Trash.
 
           ```sh
           brew tap brandondoster/screenx https://github.com/BrandonDoster/ScreenX
           brew trust --cask brandondoster/screenx/screenx
-          brew install --cask --no-quarantine screenx
-          ```
-
-          Already installed and blocked? Remove the mark and start it again:
-
-          ```sh
+          brew install --cask screenx
           xattr -dr com.apple.quarantine /Applications/ScreenX.app
           ```
+
+          Run the last line again after each `brew upgrade --cask screenx`, which
+          brings a new copy and a new mark. `--no-quarantine` used to do this and
+          was removed from Homebrew, so it is no longer an option.
 
           **macOS, from the .dmg.** Download `ScreenX_universal.dmg` below. Open
           it and drag `ScreenX.app` onto the Applications folder. The build is

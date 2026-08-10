@@ -63,8 +63,9 @@ The split is not decoration. When the webview interface was replaced, `core/`
 moved across whole — the same 23 tests, unchanged — and only the drawing was
 rewritten.
 
-`src-tauri/` and `ui/` are the previous build. They are kept until the native
-one has seen enough use, then they go.
+The previous build was deleted after v1.0.0, along with its Node test layer
+and every `npm` script. Section 16 keeps the reasoning; the code is in the
+history and nowhere else.
 
 ---
 
