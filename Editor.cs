@@ -133,7 +133,7 @@ sealed class Editor : Form
         canvas.MouseMove += Drag;
         canvas.MouseUp += Up;
         canvas.MouseDoubleClick += DoubleClicked;
-        canvas.ZoomWheel += delta => SetZoom(zoom * (delta > 0 ? 1.25f : 0.8f));
+        canvas.ZoomWheel += (delta, at) => SetZoom(zoom * (delta > 0 ? 1.25f : 0.8f), at);
 
         // Sized to the image, as far as the screen it was taken on allows.
         var area = Screen.FromPoint(Cursor.Position).WorkingArea;
@@ -167,11 +167,22 @@ sealed class Editor : Form
         return Math.Clamp(crop.Height > crop.Width * 2 ? across : Math.Min(across, down), 0.05f, 1);
     }
 
-    void SetZoom(float next)
+    /// `anchor` is a point on the canvas that should stay over the same part
+    /// of the image, which is what makes wheel zoom go where the pointer is.
+    void SetZoom(float next, Point? anchor = null)
     {
         CommitText();
+        var hold = anchor is Point a ? ToImage(a) : (PointF?)null;
         zoom = Math.Clamp(next, 0.05f, 8);
         canvas.AutoScrollMinSize = new Size((int)(crop.Width * zoom), (int)(crop.Height * zoom));
+        if (hold is PointF image && anchor is Point screen)
+        {
+            // Scroll so the image point lands back under the anchor. The
+            // setter takes positive offsets and clamps them to the range.
+            var x = (image.X - crop.X) * zoom - screen.X;
+            var y = (image.Y - crop.Y) * zoom - screen.Y;
+            canvas.AutoScrollPosition = new Point((int)Math.Max(0, x), (int)Math.Max(0, y));
+        }
         Text = $"ScreenX - {crop.Width} x {crop.Height} - {zoom * 100:0}%";
         canvas.Invalidate();
     }
@@ -736,7 +747,7 @@ sealed class Editor : Form
 /// This one is only ever the size of the window.
 sealed class Canvas : ScrollableControl
 {
-    public event Action<int>? ZoomWheel;
+    public event Action<int, Point>? ZoomWheel;
 
     public Canvas()
     {
@@ -749,7 +760,7 @@ sealed class Canvas : ScrollableControl
     {
         if ((ModifierKeys & Keys.Control) != 0)
         {
-            ZoomWheel?.Invoke(e.Delta);
+            ZoomWheel?.Invoke(e.Delta, e.Location);
             if (e is HandledMouseEventArgs handled) handled.Handled = true;
             return;
         }
