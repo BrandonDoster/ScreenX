@@ -1,5 +1,25 @@
 # Questions for Brandon
 
+## Where your answers stand (2026-10-08)
+
+| # | Your answer | Done |
+| --- | --- | --- |
+| 1 | Editor by default, copy-only in it | Default is `editor`; the editor's **Copy** puts it on the clipboard and saves nothing |
+| 2 | Same name if never saved; ask if already saved | First save uses the usual name and later saves update it; an opened file asks *Overwrite* or *Save alongside* |
+| 3 | Region Ctrl+Shift+Q, no screen/scrolling hotkey | Those are the defaults now, and your `screenx.json` has been set to them |
+| 4 | Start where the page is | Unchanged |
+| 5 | Don't stop on mouse moves | Done: it scrolls the area wherever the mouse is, and stops at the end, on Esc, or after 3 minutes |
+| 6 | Guess | Done: repeating content is guessed using the expected scroll |
+| 7 | Transparent rounded corners | Done for whole-window captures; PNG on the clipboard keeps them |
+| 8 | Don't push yet | Nothing pushed |
+| 9 | Prompt for the runtime | The .NET launcher already shows Windows' download dialog when the runtime is missing; it also runs on newer .NET now |
+| 10 | Settings GUI | **Settings...** in the tray, or start ScreenX a second time |
+| 11 | Recycle | `node_modules` and `src-tauri` are in the Recycle Bin |
+
+Also: the VS Code scrolling failure is fixed (whole window and text area,
+long and short files), and your displays are both at 100%, so mixed DPI is
+still untested; see `REVIEW-NOTES.md`.
+
 Decisions I made overnight that you may want to change, and things I could
 not decide without you. Each has the default I went with. Answer inline or
 just tell me; nothing here blocks using the build.

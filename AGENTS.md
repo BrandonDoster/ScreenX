@@ -34,6 +34,7 @@ should refer to Rust, egui, Tauri, `core/` or `app/`.
 | `Scrolling.cs` | Scrolling capture driver: wheel input, settling, border |
 | `Stitcher.cs` | Joins scrolling frames. Pure, fully tested |
 | `Editor.cs` | Annotation editor form and its `Canvas` |
+| `SettingsWindow.cs` | Settings window, hotkey recording, `--pick-folder` |
 | `Shapes.cs` | `Shape`: geometry, hit testing, handles, drawing, redaction; `History` (undo) |
 | `tests/ScreenX.Tests` | xunit tests for everything that needs no screen |
 
@@ -84,10 +85,32 @@ should refer to Rust, egui, Tauri, `core/` or `app/`.
    hashes first and then brightness profiles. Frames are compared only after
    they stop changing (smooth scrolling, lazy loading).
 
-10. **Settings are never written over.** `screenx.json` is created once
-    with the defaults; a file that fails to parse gives an error and the
-    defaults for that run, and is left as it was. It is not `settings.json`,
-    which the Rust build owns in the same folder and rewrites whole.
+9a. **Scrolling capture cannot rely on whole rows either.** A whole VS Code
+    window has an activity bar that never moves and a minimap that moves at
+    its own rate, so no row matched and the first step was lost. Frames are
+    matched in 48 px strips that vote. A strip that fits several offsets (the
+    same words on every line) must not vote: Notepad locked onto one line
+    height that way while the real scroll was six times larger. Header and
+    footer are found per strip, with tolerance, or a notification is copied
+    into every added strip; strips that never move are repainted as their
+    background rather than repeated. Verify any change here live against
+    Notepad, an Edge page with a sticky header, and VS Code both as a text
+    area and as a whole window, long and short files.
+
+10. **Settings are written only from the settings window's Save.**
+    `screenx.json` is created once with the defaults; a file that fails to
+    parse gives an error and the defaults for that run, and is left as it
+    was. It is not `settings.json`, which the Rust build owns in the same
+    folder and rewrites whole.
+
+10a. **The settings window is modeless.** `DialogResult` closes only modal
+     forms; it calls `Close()`. Hotkeys are unregistered while it is open, or
+     recording a hotkey fires it.
+
+10b. **Anything that loads shell extensions runs in a child process.** The
+     folder picker is `ScreenX.exe --pick-folder`; Save As is a task dialog,
+     not the common file dialog. Shell extensions loaded into the resident
+     process never unload.
 
 11. **Closing forms: no `BeginInvoke` from `OnFormClosed`.** It posts to the
     window being destroyed and is lost; the editor gives its memory back from
