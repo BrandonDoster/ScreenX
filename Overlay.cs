@@ -23,6 +23,7 @@ sealed class Overlay : Form
     Frame? shot, dim;
     List<Rectangle> windows = [];
     Rectangle? selection, chosen;
+    Rectangle screen;
     Point? pressed;
     bool dragging;
     Stopwatch? clock;
@@ -46,18 +47,22 @@ sealed class Overlay : Form
 
     /// Show the overlay over `shot` and return what was chosen, in the shot's
     /// own pixels, or null if it was cancelled.
-    public Rectangle? Choose(Frame shot, List<Rectangle> windows, Stopwatch clock)
+    ///
+    /// `screen` is the rectangle `shot` was read from. It is passed in rather
+    /// than read again, because the layout can change in between (a monitor
+    /// plugged in) and the overlay must match the pixels it is showing.
+    public Rectangle? Choose(Frame shot, List<Rectangle> windows, Stopwatch clock, Rectangle screen)
     {
         this.shot = shot;
         this.windows = windows;
         this.clock = clock;
+        this.screen = screen;
         dim = Dimmed(shot);
         chosen = null;
         pressed = null;
         dragging = false;
-        var area = SystemInformation.VirtualScreen;
-        Bounds = area;
-        selection = Under(Cursor.Position - (Size)area.Location);
+        Bounds = screen;
+        selection = Under(Cursor.Position - (Size)screen.Location);
         try
         {
             ShowDialog();
@@ -77,9 +82,8 @@ sealed class Overlay : Form
     {
         foreach (var window in windows)
             if (window.Contains(point)) return window;
-        var area = SystemInformation.VirtualScreen;
-        var monitor = Screen.FromPoint(point + (Size)area.Location).Bounds;
-        monitor.Offset(-area.X, -area.Y);
+        var monitor = Screen.FromPoint(point + (Size)screen.Location).Bounds;
+        monitor.Offset(-screen.X, -screen.Y);
         return monitor;
     }
 
@@ -91,12 +95,24 @@ sealed class Overlay : Form
         selection = next;
     }
 
-    /// Everything a selection draws: itself, its border, and the size label.
-    static Rectangle Around(Rectangle r) =>
-        Rectangle.FromLTRB(r.Left - 2, r.Top - 28, Math.Max(r.Right, r.Left + 160) + 2, r.Bottom + 2);
+    /// Everything a selection draws: itself, its border, and the size label,
+    /// which is measured because it grows with the display scale.
+    Rectangle Around(Rectangle r)
+    {
+        var label = TextRenderer.MeasureText(" 99999 x 99999 ", Font);
+        var height = Math.Max(label.Height, Font.Height) + 4;
+        return Rectangle.FromLTRB(r.Left - 2, r.Top - height - 2,
+            Math.Max(r.Right, r.Left + label.Width) + 2, Math.Max(r.Bottom, r.Top + height + 2) + 2);
+    }
 
     void Finish(Rectangle? result)
     {
+        // Never more than the capture holds.
+        if (result is Rectangle r && shot != null)
+        {
+            r.Intersect(new Rectangle(0, 0, shot.Width, shot.Height));
+            result = r.Width > 0 && r.Height > 0 ? r : null;
+        }
         chosen = result;
         // Ends ShowDialog. A modal form is hidden by this, not disposed.
         DialogResult = DialogResult.OK;
@@ -175,7 +191,9 @@ sealed class Overlay : Form
         if (selection is Rectangle sel)
         {
             g.DrawRectangle(border, sel.X - 1, sel.Y - 1, sel.Width + 1, sel.Height + 1);
-            var label = new Point(sel.X, sel.Y >= 26 ? sel.Y - 26 : sel.Y + 2);
+            var height = Font.Height + 4;
+            // Above the selection, or inside it when there is no room above.
+            var label = new Point(sel.X, sel.Y >= height ? sel.Y - height : sel.Y + 2);
             TextRenderer.DrawText(g, $" {sel.Width} x {sel.Height} ", Font, label,
                 Color.White, Color.FromArgb(32, 32, 32));
         }

@@ -217,6 +217,94 @@ public class ShapeTests
     }
 }
 
+public class ImageTests
+{
+    [Theory]
+    [InlineData(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }, true)] // PNG
+    [InlineData(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }, true)] // JPEG
+    [InlineData(new byte[] { 0x42, 0x4D, 0, 0 }, true)] // BMP
+    [InlineData(new byte[] { 0x47, 0x49, 0x46, 0x38, 0x39, 0x61 }, true)] // GIF
+    [InlineData(new byte[] { 0x01, 0x00, 0x00, 0x00 }, false)] // EMF
+    [InlineData(new byte[] { 0xD7, 0xCD, 0xC6, 0x9A }, false)] // WMF
+    [InlineData(new byte[] { 0x49, 0x49, 0x2A, 0x00 }, false)] // TIFF
+    [InlineData(new byte[] { }, false)]
+    public void Only_the_formats_it_needs_are_decoded(byte[] head, bool supported) =>
+        Assert.Equal(supported, Images.IsSupported(head));
+
+    [Fact]
+    public void A_file_with_an_image_name_but_other_contents_is_refused()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"screenx-{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(path, [0x01, 0, 0, 0, 0, 0, 0, 0]);
+        try
+        {
+            Assert.Throws<InvalidDataException>(() => Images.Open(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}
+
+public class FrameBoundsTests
+{
+    /// The rectangle can come from a different screen layout than the frame.
+    /// Past the edge must throw, not read memory beyond the pixels.
+    [Theory]
+    [InlineData(0, 0, 11, 8)]
+    [InlineData(5, 5, 6, 3)]
+    [InlineData(-1, 0, 4, 4)]
+    [InlineData(0, 0, 0, 4)]
+    public void A_rectangle_past_the_frame_is_refused(int x, int y, int w, int h)
+    {
+        using var frame = new Frame(10, 8);
+        Assert.Throws<ArgumentOutOfRangeException>(() => frame.ToBitmap(new Rectangle(x, y, w, h)));
+    }
+
+    [Fact]
+    public void Disposing_twice_is_harmless()
+    {
+        var frame = new Frame(4, 4);
+        frame.Dispose();
+        frame.Dispose();
+    }
+}
+
+public sealed class FolderSettingsTests : IDisposable
+{
+    readonly string folder = Directory.CreateTempSubdirectory("screenx-folder-").FullName;
+    string File => Path.Combine(folder, "screenx.json");
+
+    public void Dispose() => Directory.Delete(folder, true);
+
+    [Fact]
+    public void A_relative_folder_is_refused_with_a_reason()
+    {
+        System.IO.File.WriteAllText(File, "{ \"Folder\": \"shots\" }");
+        var (settings, error) = Settings.Load(File);
+        Assert.NotNull(error);
+        Assert.True(Path.IsPathFullyQualified(settings.Folder));
+    }
+
+    [Fact]
+    public void Environment_variables_in_the_folder_are_expanded()
+    {
+        System.IO.File.WriteAllText(File, "{ \"Folder\": \"%TEMP%\\\\shots\" }");
+        var (settings, error) = Settings.Load(File);
+        Assert.Null(error);
+        Assert.Equal(Path.Combine(Environment.GetEnvironmentVariable("TEMP")!, "shots"), settings.Folder);
+    }
+
+    [Fact]
+    public void A_null_hotkey_means_none_rather_than_a_crash()
+    {
+        System.IO.File.WriteAllText(File, "{ \"ScrollHotkey\": null }");
+        var (settings, _) = Settings.Load(File);
+        Assert.Equal("", settings.ScrollHotkey);
+    }
+}
+
 public sealed class PathTests : IDisposable
 {
     readonly string folder = Directory.CreateTempSubdirectory("screenx-paths-").FullName;

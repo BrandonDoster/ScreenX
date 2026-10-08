@@ -75,7 +75,8 @@ static class Capture
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
-        SetProcessWorkingSetSize(System.Diagnostics.Process.GetCurrentProcess().Handle, -1, -1);
+        // -1 is the current process's pseudo-handle, which needs no closing.
+        SetProcessWorkingSetSize(-1, -1, -1);
     }
 
     const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14;
@@ -108,14 +109,17 @@ sealed unsafe class Frame : IDisposable
     public readonly IntPtr Dc;
     readonly IntPtr bitmap, previous;
     readonly uint* bits;
+    bool disposed;
 
     public Frame(int width, int height)
     {
+        if (width < 1 || height < 1) throw new ArgumentOutOfRangeException(nameof(width), "a frame needs at least one pixel");
         Width = width;
         Height = height;
         // Negative height: rows run top to bottom, as everything else assumes.
         var header = new Gdi.BITMAPINFOHEADER { Size = 40, Width = width, Height = -height, Planes = 1, BitCount = 32 };
         Dc = Gdi.CreateCompatibleDC(IntPtr.Zero);
+        if (Dc == IntPtr.Zero) throw new OutOfMemoryException("could not create a drawing surface");
         bitmap = Gdi.CreateDIBSection(Dc, ref header, 0, out var pixels, IntPtr.Zero, 0);
         if (bitmap == IntPtr.Zero)
         {
@@ -130,8 +134,14 @@ sealed unsafe class Frame : IDisposable
     public Span<uint> Pixels => new(bits, Width * Height);
 
     /// A copy of `rect` as a GDI+ bitmap, for saving and the clipboard.
+    ///
+    /// Checked, because this wraps a raw pointer: a rectangle chosen against
+    /// a different screen layout (a monitor plugged in mid-capture) would
+    /// otherwise read memory past the end of the pixels.
     public Bitmap ToBitmap(Rectangle rect)
     {
+        if (rect.X < 0 || rect.Y < 0 || rect.Width < 1 || rect.Height < 1 || rect.Right > Width || rect.Bottom > Height)
+            throw new ArgumentOutOfRangeException(nameof(rect), $"{rect} is outside the {Width} x {Height} capture");
         using var view = new Bitmap(rect.Width, rect.Height, Width * 4, PixelFormat.Format32bppRgb,
             (IntPtr)(bits + (long)rect.Y * Width + rect.X));
         return view.Clone(new Rectangle(Point.Empty, rect.Size), PixelFormat.Format32bppRgb);
@@ -141,6 +151,8 @@ sealed unsafe class Frame : IDisposable
 
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
         Gdi.SelectObject(Dc, previous);
         Gdi.DeleteObject(bitmap);
         Gdi.DeleteDC(Dc);

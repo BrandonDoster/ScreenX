@@ -13,6 +13,10 @@ namespace ScreenX;
 
 static class Program
 {
+    /// Loaded once and shared by the tray and every editor, rather than a new
+    /// icon handle per window that only the finalizer would release.
+    public static readonly Icon Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath)!;
+
     [STAThread]
     static int Main(string[] args)
     {
@@ -24,9 +28,9 @@ static class Program
             Bitmap image;
             try
             {
-                image = new Bitmap(file);
+                image = Images.Open(file);
             }
-            catch (Exception e) when (e is IOException or ArgumentException)
+            catch (Exception e) when (Images.IsLoadFailure(e))
             {
                 MessageBox.Show($"Could not open {file}: {e.Message}", "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
@@ -42,6 +46,34 @@ static class Program
         Application.Run(new Tray());
         return 0;
     }
+}
+
+/// Opening image files from disk, which "Open with" makes reachable from any
+/// downloaded file.
+static class Images
+{
+    /// PNG, JPEG, BMP and GIF only, by their first bytes rather than the name.
+    /// GDI+ would also parse EMF, WMF and TIFF, whose decoders have the
+    /// longest record of security fixes, and nothing here needs them.
+    public static Bitmap Open(string path)
+    {
+        Span<byte> head = stackalloc byte[8];
+        using (var stream = File.OpenRead(path))
+            head = head[..stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false)];
+        if (!IsSupported(head)) throw new InvalidDataException("not a PNG, JPEG, BMP or GIF image");
+        return new Bitmap(path);
+    }
+
+    public static bool IsSupported(ReadOnlySpan<byte> head) =>
+        head.StartsWith((ReadOnlySpan<byte>)[0x89, (byte)'P', (byte)'N', (byte)'G'])
+        || head.StartsWith((ReadOnlySpan<byte>)[0xFF, 0xD8, 0xFF])
+        || head.StartsWith("BM"u8)
+        || head.StartsWith("GIF8"u8);
+
+    /// GDI+ reports a corrupt image as OutOfMemoryException.
+    public static bool IsLoadFailure(Exception e) =>
+        e is IOException or UnauthorizedAccessException or ArgumentException or OutOfMemoryException
+            or System.Runtime.InteropServices.ExternalException;
 }
 
 sealed class Settings
@@ -86,8 +118,23 @@ sealed class Settings
         try
         {
             var loaded = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path)) ?? new();
-            // An explicit null in the file must not become a null folder.
-            if (string.IsNullOrWhiteSpace(loaded.Folder)) loaded.Folder = new Settings().Folder;
+            loaded.RegionHotkey ??= "";
+            loaded.ScreenHotkey ??= "";
+            loaded.ScrollHotkey ??= "";
+            loaded.AfterCapture ??= "both";
+            // An explicit null in the file must not become a null folder, and
+            // a relative one would land wherever the working directory is:
+            // System32, when Windows starts the program.
+            var folder = Environment.ExpandEnvironmentVariables(loaded.Folder ?? "");
+            if (!Path.IsPathFullyQualified(folder))
+            {
+                var fallback = new Settings().Folder;
+                var problem = string.IsNullOrWhiteSpace(folder) ? null
+                    : $"Folder \"{loaded.Folder}\" is not a full path; using {fallback}.";
+                loaded.Folder = fallback;
+                return (loaded, problem);
+            }
+            loaded.Folder = folder;
             return (loaded, null);
         }
         catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)

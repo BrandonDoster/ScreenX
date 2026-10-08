@@ -55,6 +55,8 @@ sealed class Editor : Form
     bool moved;
     TextBox? typing;
     PointF typingAt;
+    /// The text shape being retyped, if it is an existing one.
+    Shape? editing;
 
     /// Annotations not yet copied or saved anywhere.
     bool dirty;
@@ -75,14 +77,17 @@ sealed class Editor : Form
         using (var g = Graphics.FromImage(source))
         {
             g.CompositingMode = CompositingMode.SourceCopy;
-            g.DrawImageUnscaled(image, 0, 0);
+            // An explicit size, not DrawImageUnscaled: that scales by the
+            // file's DPI against the screen's, so a 96 DPI PNG opened at 150%
+            // came out enlarged and clipped.
+            g.DrawImage(image, new Rectangle(0, 0, image.Width, image.Height));
         }
         cache = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
         crop = new Rectangle(Point.Empty, image.Size);
         history.Add(([], crop));
 
         Text = "ScreenX";
-        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        Icon = Program.Icon;
         KeyPreview = true;
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.Manual;
@@ -128,9 +133,11 @@ sealed class Editor : Form
 
         // Sized to the image, as far as the screen it was taken on allows.
         var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        // Min then Max rather than Clamp: on a screen smaller than the minimum,
+        // Clamp throws instead of choosing.
         ClientSize = new Size(
-            Math.Clamp(image.Width + 40, 720, area.Width * 9 / 10),
-            Math.Clamp(image.Height + bar.PreferredSize.Height + 40, 420, area.Height * 9 / 10));
+            Math.Min(Math.Max(image.Width + 40, 720), area.Width * 9 / 10),
+            Math.Min(Math.Max(image.Height + bar.PreferredSize.Height + 40, 420), area.Height * 9 / 10));
         Location = new Point(area.X + (area.Width - Width) / 2, area.Y + (area.Height - Height) / 2);
 
         Rebuild();
@@ -411,13 +418,16 @@ sealed class Editor : Form
     void DoubleClicked(object? sender, MouseEventArgs e)
     {
         if (tool != Tool.Select || selected is not { Kind: Kind.Text } text) return;
-        shapes.Remove(text);
         selected = null;
         grabbed = null;
-        live = null;
+        // Left in the list and only hidden while it is retyped, so Esc puts it
+        // back as it was and undo still lines up with history.
+        editing = text;
+        live = text;
         Rebuild();
         colour = text.Colour;
         width = text.Width;
+        UpdateBar();
         StartTyping(text.Points[0], text.Text);
     }
 
@@ -471,7 +481,17 @@ sealed class Editor : Form
     {
         if (typing == null) return;
         var text = typing.Text.TrimEnd('\r', '\n');
+        var original = editing;
         CancelText();
+        if (original != null)
+        {
+            // Retyped: changed in place, or deleted by emptying it.
+            if (text == original.Text) return;
+            if (text.Length == 0) shapes.Remove(original);
+            else original.Text = text;
+            Commit();
+            return;
+        }
         if (text.Length == 0) return;
         shapes.Add(new Shape { Kind = Kind.Text, Colour = colour, Width = width, Points = [typingAt], Text = text });
         Commit();
@@ -485,7 +505,14 @@ sealed class Editor : Form
         // otherwise commit the text a second time.
         typing = null;
         canvas.Controls.Remove(box);
+        box.Font.Dispose();
         box.Dispose();
+        if (editing != null)
+        {
+            editing = null;
+            live = null;
+            Rebuild();
+        }
         canvas.Focus();
     }
 
@@ -507,7 +534,14 @@ sealed class Editor : Form
                 Commit();
                 return true;
             case Keys.Escape:
-                if (live != null) { live = null; canvas.Invalidate(); }
+                if (grabbed != null)
+                {
+                    // Mid-move: put it back where the move started.
+                    grabbed = null;
+                    live = null;
+                    Restore(at);
+                }
+                else if (live != null) { live = null; canvas.Invalidate(); }
                 else if (selected != null) { selected = null; canvas.Invalidate(); }
                 else Close();
                 return true;
@@ -546,15 +580,17 @@ sealed class Editor : Form
         }
 
         g.SetClip(view);
-        g.Transform = new Matrix(zoom, 0, 0, zoom, origin.X - crop.X * zoom, origin.Y - crop.Y * zoom);
+        using var transform = new Matrix(zoom, 0, 0, zoom, origin.X - crop.X * zoom, origin.Y - crop.Y * zoom);
+        g.Transform = transform;
         g.PixelOffsetMode = PixelOffsetMode.Default;
 
         if (live != null && tool == Tool.Crop)
         {
             DrawCropping(g, live);
         }
-        else
+        else if (live != editing)
         {
+            // Text being retyped is hidden; the text box shows it.
             live?.Draw(g, source);
         }
 
