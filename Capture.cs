@@ -175,21 +175,16 @@ static unsafe class Clip
     /// copy belongs to the clipboard.
     public static void Copy(Span<uint> pixels, int width, Rectangle rect, IntPtr owner)
     {
-        var memory = GlobalAlloc(GMEM_MOVEABLE, (nuint)(40 + (long)rect.Width * rect.Height * 4));
+        var size = DibSize(rect);
+        var memory = GlobalAlloc(GMEM_MOVEABLE, (nuint)size);
         if (memory == IntPtr.Zero) throw new OutOfMemoryException("could not allocate the clipboard copy");
         var p = (byte*)GlobalLock(memory);
-        // Bottom-up: readers of CF_DIB mishandle the top-down form often
-        // enough that it is not worth the saved loop.
-        *(Gdi.BITMAPINFOHEADER*)p = new() { Size = 40, Width = rect.Width, Height = rect.Height, Planes = 1, BitCount = 32 };
-        var to = new Span<uint>(p + 40, rect.Width * rect.Height);
-        for (var y = 0; y < rect.Height; y++)
+        if (p == null)
         {
-            var src = pixels.Slice((rect.Y + y) * width + rect.X, rect.Width);
-            var dst = to.Slice((rect.Height - 1 - y) * rect.Width, rect.Width);
-            // The screen read leaves alpha at zero, and some programs honour
-            // it in a 32 bpp DIB and paste a transparent image.
-            for (var x = 0; x < src.Length; x++) dst[x] = src[x] | 0xFF000000;
+            GlobalFree(memory);
+            throw new OutOfMemoryException("could not lock the clipboard copy");
         }
+        PackDib(pixels, width, rect, new Span<byte>(p, checked((int)size)));
         GlobalUnlock(memory);
 
         // A clipboard manager can be holding it for a moment.
@@ -212,6 +207,30 @@ static unsafe class Clip
         finally
         {
             CloseClipboard();
+        }
+    }
+
+    public static long DibSize(Rectangle rect) => 40 + (long)rect.Width * rect.Height * 4;
+
+    /// A CF_DIB: a BITMAPINFOHEADER, then the rows of `rect`, bottom row
+    /// first. `pixels` is an image `width` pixels wide.
+    public static void PackDib(ReadOnlySpan<uint> pixels, int width, Rectangle rect, Span<byte> dib)
+    {
+        if (rect.X < 0 || rect.Y < 0 || rect.Right > width || (long)rect.Bottom * width > pixels.Length)
+            throw new ArgumentOutOfRangeException(nameof(rect), "outside the image");
+        if (dib.Length < DibSize(rect)) throw new ArgumentException("buffer too small", nameof(dib));
+        // Bottom-up: readers of CF_DIB mishandle the top-down form often
+        // enough that it is not worth the saved loop.
+        var header = new Gdi.BITMAPINFOHEADER { Size = 40, Width = rect.Width, Height = rect.Height, Planes = 1, BitCount = 32 };
+        System.Runtime.InteropServices.MemoryMarshal.Write(dib, in header);
+        var to = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(dib[40..]);
+        for (var y = 0; y < rect.Height; y++)
+        {
+            var src = pixels.Slice((rect.Y + y) * width + rect.X, rect.Width);
+            var dst = to.Slice((rect.Height - 1 - y) * rect.Width, rect.Width);
+            // The screen read leaves alpha at zero, and some programs honour
+            // it in a 32 bpp DIB and paste a transparent image.
+            for (var x = 0; x < src.Length; x++) dst[x] = src[x] | 0xFF000000;
         }
     }
 

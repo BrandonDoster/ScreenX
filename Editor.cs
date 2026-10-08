@@ -146,8 +146,15 @@ sealed class Editor : Form
 
     /// As large as the window allows, but never enlarged: growing the image
     /// is the zoom's job, and doing it on open looks like a mistake.
-    float Fit() => Math.Min(1, Math.Min(
-        (canvas.ClientSize.Width - 24f) / crop.Width, (canvas.ClientSize.Height - 24f) / crop.Height));
+    ///
+    /// A scrolling capture is read top to bottom, so it fits by width alone;
+    /// fitting its height as well would shrink it to a strip.
+    float Fit()
+    {
+        var across = (canvas.ClientSize.Width - 24f) / crop.Width;
+        var down = (canvas.ClientSize.Height - 24f) / crop.Height;
+        return Math.Clamp(crop.Height > crop.Width * 2 ? across : Math.Min(across, down), 0.05f, 1);
+    }
 
     void SetZoom(float next)
     {

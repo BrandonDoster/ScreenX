@@ -28,4 +28,10 @@
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The tests are their own project, beside this one rather than in it. -->
+    <Compile Remove="tests/**" />
+    <InternalsVisibleTo Include="ScreenX.Tests" />
+  </ItemGroup>
+
 </Project>

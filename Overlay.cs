@@ -196,7 +196,7 @@ sealed class Overlay : Form
     }
 
     /// The capture at half brightness, made once rather than blended per frame.
-    static Frame Dimmed(Frame shot)
+    internal static Frame Dimmed(Frame shot)
     {
         var dim = new Frame(shot.Width, shot.Height);
         ReadOnlySpan<uint> from = shot.Pixels;
