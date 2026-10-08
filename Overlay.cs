@@ -24,6 +24,7 @@ sealed class Overlay : Form
     List<Rectangle> windows = [];
     Rectangle? selection, chosen;
     Rectangle screen;
+    Point? pointer;
     Point? pressed;
     bool dragging;
     Stopwatch? clock;
@@ -62,7 +63,8 @@ sealed class Overlay : Form
         pressed = null;
         dragging = false;
         Bounds = screen;
-        selection = Under(Cursor.Position - (Size)screen.Location);
+        pointer = Cursor.Position - (Size)screen.Location;
+        selection = Under(pointer.Value);
         try
         {
             ShowDialog();
@@ -132,8 +134,34 @@ sealed class Overlay : Form
         else if (e.Button == MouseButtons.Right) Finish(null);
     }
 
+    /// Pixels either side of the pointer shown in the magnifier.
+    const int Reach = 7;
+    int Zoom => 8 * Math.Max(1, DeviceDpi / 96);
+
+    /// Where the magnifier goes for a pointer at `p`: below and right of it,
+    /// flipped to the other side at the edges of the monitor it is on.
+    Rectangle Magnifier(Point p)
+    {
+        var size = (Reach * 2 + 1) * Zoom;
+        var label = Font.Height + 6;
+        var monitor = Screen.FromPoint(p + (Size)screen.Location).Bounds;
+        monitor.Offset(-screen.X, -screen.Y);
+        var x = p.X + 24 + size > monitor.Right ? p.X - 24 - size : p.X + 24;
+        var y = p.Y + 24 + size + label > monitor.Bottom ? p.Y - 24 - size - label : p.Y + 24;
+        return new Rectangle(x, y, size, size + label);
+    }
+
+    void MovePointer(Point p)
+    {
+        if (pointer == p) return;
+        if (pointer is Point old) Invalidate(Rectangle.Inflate(Magnifier(old), 2, 2));
+        pointer = p;
+        Invalidate(Rectangle.Inflate(Magnifier(p), 2, 2));
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        MovePointer(e.Location);
         if (pressed is not Point from)
         {
             Select(Under(e.Location));
@@ -159,28 +187,61 @@ sealed class Overlay : Form
         else if (e.KeyCode == Keys.Enter) Finish(selection);
     }
 
+    /// Arrow keys move the pointer a pixel at a time (ten with Shift), so an
+    /// edge can be placed exactly with the magnifier. Handled here because a
+    /// form treats arrows as focus navigation before KeyDown sees them.
+    protected override bool ProcessCmdKey(ref Message msg, Keys keys)
+    {
+        var step = (keys & Keys.Shift) != 0 ? 10 : 1;
+        var move = (keys & Keys.KeyCode) switch
+        {
+            Keys.Left => new Size(-step, 0),
+            Keys.Right => new Size(step, 0),
+            Keys.Up => new Size(0, -step),
+            Keys.Down => new Size(0, step),
+            _ => Size.Empty,
+        };
+        if (move.IsEmpty) return base.ProcessCmdKey(ref msg, keys);
+        Cursor.Position += move;
+        return true;
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         if (shot == null || dim == null) return;
         var g = e.Graphics;
         var clip = e.ClipRectangle;
+        Rectangle? magnifier = pointer is Point at ? Magnifier(at) : null;
 
-        // Dim outside, bright inside, never both over the same pixel, so
-        // nothing flickers without a back buffer. A back buffer the size of the
-        // virtual screen would be allocated on every paint.
+        // Dim outside, bright inside, magnifier on top, and never two of them
+        // over the same pixel, so nothing flickers without a back buffer. A back
+        // buffer the size of the virtual screen would be allocated every paint.
         var hdc = g.GetHdc();
         try
         {
-            if (selection is Rectangle cut) Gdi.ExcludeClipRect(hdc, cut.Left, cut.Top, cut.Right, cut.Bottom);
+            void KeepOut(Rectangle? r)
+            {
+                if (r is Rectangle k) Gdi.ExcludeClipRect(hdc, k.Left, k.Top, k.Right, k.Bottom);
+            }
+            KeepOut(selection);
+            KeepOut(magnifier);
             Gdi.BitBlt(hdc, clip.X, clip.Y, clip.Width, clip.Height, dim.Dc, clip.X, clip.Y, Gdi.SRCCOPY);
+            // Back to the update region alone; the system keeps that apart
+            // from the clip set here.
+            Gdi.SelectClipRgn(hdc, IntPtr.Zero);
             if (selection is Rectangle lit)
             {
-                // Back to the update region alone; the system keeps that apart
-                // from the clip set above.
-                Gdi.SelectClipRgn(hdc, IntPtr.Zero);
+                KeepOut(magnifier);
                 var bright = Rectangle.Intersect(clip, lit);
                 if (!bright.IsEmpty)
                     Gdi.BitBlt(hdc, bright.X, bright.Y, bright.Width, bright.Height, shot.Dc, bright.X, bright.Y, Gdi.SRCCOPY);
+                Gdi.SelectClipRgn(hdc, IntPtr.Zero);
+            }
+            if (magnifier is Rectangle m && pointer is Point p && m.IntersectsWith(clip))
+            {
+                Gdi.SetStretchBltMode(hdc, Gdi.COLORONCOLOR);
+                Gdi.StretchBlt(hdc, m.X, m.Y, m.Width, m.Width, shot.Dc, p.X - Reach, p.Y - Reach,
+                    Reach * 2 + 1, Reach * 2 + 1, Gdi.SRCCOPY);
             }
         }
         finally
@@ -188,6 +249,7 @@ sealed class Overlay : Form
             g.ReleaseHdc(hdc);
         }
 
+        if (magnifier is Rectangle keep) g.ExcludeClip(keep);
         if (selection is Rectangle sel)
         {
             g.DrawRectangle(border, sel.X - 1, sel.Y - 1, sel.Width + 1, sel.Height + 1);
@@ -196,6 +258,19 @@ sealed class Overlay : Form
             var label = new Point(sel.X, sel.Y >= height ? sel.Y - height : sel.Y + 2);
             TextRenderer.DrawText(g, $" {sel.Width} x {sel.Height} ", Font, label,
                 Color.White, Color.FromArgb(32, 32, 32));
+        }
+        g.ResetClip();
+        if (magnifier is Rectangle box && pointer is Point here)
+        {
+            var zoom = Zoom;
+            g.DrawRectangle(Pens.White, box.X, box.Y, box.Width - 1, box.Width - 1);
+            // The pixel under the pointer.
+            g.DrawRectangle(border, box.X + Reach * zoom, box.Y + Reach * zoom, zoom - 1, zoom - 1);
+            var caption = new Rectangle(box.X, box.Y + box.Width, box.Width, box.Height - box.Width);
+            var screenPoint = here + (Size)screen.Location;
+            using (var back = new SolidBrush(Color.FromArgb(32, 32, 32))) g.FillRectangle(back, caption);
+            TextRenderer.DrawText(g, $"{screenPoint.X}, {screenPoint.Y}", Font, caption, Color.White,
+                Color.FromArgb(32, 32, 32), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
         if (clock != null)

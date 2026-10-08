@@ -278,6 +278,12 @@ static class Gdi
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
     [DllImport("gdi32.dll")]
     public static extern IntPtr CreateDIBSection(IntPtr dc, ref BITMAPINFOHEADER info, uint usage, out IntPtr bits, IntPtr section, uint offset);
+    public const int COLORONCOLOR = 3;
+
     [DllImport("gdi32.dll")] public static extern int ExcludeClipRect(IntPtr dc, int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] public static extern int SetStretchBltMode(IntPtr dc, int mode);
+    [DllImport("gdi32.dll")]
+    public static extern bool StretchBlt(IntPtr dest, int x, int y, int width, int height,
+        IntPtr src, int srcX, int srcY, int srcWidth, int srcHeight, uint rop);
     [DllImport("gdi32.dll")] public static extern int SelectClipRgn(IntPtr dc, IntPtr region);
 }
