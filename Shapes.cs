@@ -9,6 +9,48 @@ namespace ScreenX;
 
 enum Kind { Rect, Ellipse, Arrow, Line, Pen, Highlight, Text, Step, Redact }
 
+/// The editor's undo history. A step is the shape list and the crop, never
+/// pixels, so it costs a few hundred bytes however large the capture is.
+/// Steps are copied going in and coming out, so editing the current shapes
+/// never reaches back into history.
+sealed class History
+{
+    const int Limit = 200;
+    readonly List<(List<Shape> shapes, Rectangle crop)> steps = [];
+    int at;
+
+    public History(Rectangle crop) => steps.Add(([], crop));
+
+    public bool CanUndo => at > 0;
+    public bool CanRedo => at < steps.Count - 1;
+
+    /// A new step after the current one; anything that had been undone is gone.
+    public void Push(IEnumerable<Shape> shapes, Rectangle crop)
+    {
+        steps.RemoveRange(at + 1, steps.Count - at - 1);
+        steps.Add((shapes.Select(s => s.Clone()).ToList(), crop));
+        if (steps.Count > Limit) steps.RemoveAt(0);
+        at = steps.Count - 1;
+    }
+
+    public (List<Shape> shapes, Rectangle crop) Current =>
+        (steps[at].shapes.Select(s => s.Clone()).ToList(), steps[at].crop);
+
+    public bool Undo()
+    {
+        if (!CanUndo) return false;
+        at--;
+        return true;
+    }
+
+    public bool Redo()
+    {
+        if (!CanRedo) return false;
+        at++;
+        return true;
+    }
+}
+
 /// One annotation, in image pixels. Shapes stay objects until export, so they
 /// can be selected, moved and deleted, and undo is a list copy rather than an
 /// image copy.

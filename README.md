@@ -16,8 +16,9 @@ two-monitor desktop (5120x1440 + second display), approximate:
 ## Use
 
 - `Control+Alt+A`: region. Hover to pick a window (or the monitor under the
-  pointer) and click, or drag a rectangle. Enter takes the highlighted area;
-  Esc or right click cancels.
+  pointer) and click, or drag a rectangle. A magnifier shows the pixels under
+  the pointer, and the arrow keys move it one pixel at a time (ten with
+  Shift). Enter takes the highlighted area; Esc or right click cancels.
 - `Control+Alt+F`: the monitor under the pointer, no overlay.
 - `Control+Alt+S`: scrolling capture. Choose the area as for a region (hover
   picks a window; for a browser, drag just the page so the tabs are left out),
@@ -36,7 +37,7 @@ notification, or **Edit last screenshot** in the tray menu, to annotate it.
 
 | Key | Tool |
 | --- | --- |
-| V | Select: drag to move, Delete to remove, double-click text to edit |
+| V | Select: drag to move, drag a handle to resize, Delete to remove, double-click text to edit |
 | A / R / E / L / P | Arrow, box, ellipse, line, pen |
 | H | Highlight |
 | T | Text: Enter places it, Shift+Enter for a new line |

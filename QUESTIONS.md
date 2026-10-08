@@ -32,6 +32,16 @@ just tell me; nothing here blocks using the build.
    because the wheel goes to whatever is under the pointer and moving would
    scroll something else. One ShareX complaint is exactly this. Keep it?
 
+6a. **Scrolling capture of repeating content.** On the first step, a page
+   whose rows repeat exactly (an empty grid, a list of identical lines) fits
+   several offsets and ScreenX stops rather than guess, because a guess
+   silently duplicates or drops rows. After the first step it uses the scroll
+   amount it has seen. Acceptable, or would you rather it guess?
+
+6b. **Window snapping and rounded corners.** Clicking a window takes its
+   visible frame, so Windows 11's rounded corners show a sliver of whatever
+   is behind. ShareX can make those corners transparent. Worth doing?
+
 ## Shipping
 
 6. **Push and release.** Everything is committed on the local `windows`

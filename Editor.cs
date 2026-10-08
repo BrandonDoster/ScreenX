@@ -30,7 +30,6 @@ sealed class Editor : Form
 
     static readonly (string label, float width)[] Sizes = [("S", 2), ("M", 4), ("L", 8)];
 
-    const int HistoryLimit = 200;
 
     /// The capture as it arrived. Redaction samples it, so nothing drawn on
     /// top can leak through a pixelated block.
@@ -39,8 +38,7 @@ sealed class Editor : Form
     readonly Bitmap cache;
     List<Shape> shapes = [];
     Rectangle crop;
-    readonly List<(List<Shape> shapes, Rectangle crop)> history = [];
-    int at;
+    readonly History history;
 
     Tool tool = Tool.Arrow;
     Color colour = Swatches[0];
@@ -88,7 +86,7 @@ sealed class Editor : Form
         }
         cache = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
         crop = new Rectangle(Point.Empty, image.Size);
-        history.Add(([], crop));
+        history = new History(crop);
 
         Text = "ScreenX";
         Icon = Program.Icon;
@@ -208,8 +206,8 @@ sealed class Editor : Form
                     float w => w == width,
                     _ => false,
                 };
-        undo.Enabled = at > 0;
-        redo.Enabled = at < history.Count - 1;
+        undo.Enabled = history.CanUndo;
+        redo.Enabled = history.CanRedo;
     }
 
     void SetTool(Tool next)
@@ -263,24 +261,22 @@ sealed class Editor : Form
 
     void Commit()
     {
-        history.RemoveRange(at + 1, history.Count - at - 1);
-        history.Add((shapes.Select(s => s.Clone()).ToList(), crop));
-        if (history.Count > HistoryLimit) history.RemoveAt(0);
-        at = history.Count - 1;
+        history.Push(shapes, crop);
         dirty = true;
         status.Text = "";
         Rebuild();
         UpdateBar();
     }
 
-    /// `changes` is false when this only puts back what is already the
-    /// current step, so closing afterwards does not ask about nothing.
-    void Restore(int index, bool changes = true)
+    /// Back to the current step of history. `changes` is false when that only
+    /// puts back what was already there, so closing afterwards does not ask
+    /// about nothing.
+    void Restore(bool changes = true)
     {
-        at = index;
-        shapes = history[at].shapes.Select(s => s.Clone()).ToList();
-        var cropChanged = crop != history[at].crop;
-        crop = history[at].crop;
+        var (restored, restoredCrop) = history.Current;
+        shapes = restored;
+        var cropChanged = crop != restoredCrop;
+        crop = restoredCrop;
         selected = null;
         if (changes) dirty = true;
         Rebuild();
@@ -291,12 +287,12 @@ sealed class Editor : Form
     void Undo()
     {
         CommitText();
-        if (at > 0) Restore(at - 1);
+        if (history.Undo()) Restore();
     }
 
     void Redo()
     {
-        if (at < history.Count - 1) Restore(at + 1);
+        if (history.Redo()) Restore();
     }
 
     void Rebuild()
@@ -604,7 +600,7 @@ sealed class Editor : Form
                     grabbed = null;
                     handle = null;
                     live = null;
-                    Restore(at, changes: false);
+                    Restore(changes: false);
                 }
                 else if (live != null) { live = null; canvas.Invalidate(); }
                 else if (selected != null) { selected = null; canvas.Invalidate(); }

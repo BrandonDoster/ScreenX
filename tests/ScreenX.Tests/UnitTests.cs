@@ -340,6 +340,68 @@ public sealed class FolderSettingsTests : IDisposable
     }
 }
 
+public class HistoryTests
+{
+    static readonly Rectangle Whole = new(0, 0, 100, 100);
+    static Shape Box(int x) => new() { Kind = Kind.Rect, Points = [new(x, x), new(x + 10, x + 10)] };
+
+    [Fact]
+    public void Undo_and_redo_walk_the_steps_including_a_crop()
+    {
+        var history = new History(Whole);
+        var shapes = new List<Shape> { Box(1) };
+        history.Push(shapes, Whole);
+        history.Push(shapes, new Rectangle(10, 10, 50, 50));
+        Assert.True(history.Undo());
+        Assert.Equal(Whole, history.Current.crop);
+        Assert.Single(history.Current.shapes);
+        Assert.True(history.Undo());
+        Assert.Empty(history.Current.shapes);
+        Assert.False(history.Undo());
+        Assert.True(history.Redo());
+        Assert.True(history.Redo());
+        Assert.Equal(new Rectangle(10, 10, 50, 50), history.Current.crop);
+        Assert.False(history.Redo());
+    }
+
+    [Fact]
+    public void A_new_step_after_undo_discards_what_was_undone()
+    {
+        var history = new History(Whole);
+        history.Push([Box(1)], Whole);
+        history.Push([Box(1), Box(2)], Whole);
+        history.Undo();
+        history.Push([Box(3)], Whole);
+        Assert.False(history.CanRedo);
+        Assert.Equal(new PointF(3, 3), history.Current.shapes.Single().Points[0]);
+    }
+
+    /// The editor moves shapes in place. That must not reach back and change
+    /// the step it came from, or undoing a move would undo nothing.
+    [Fact]
+    public void Editing_the_current_shapes_does_not_change_history()
+    {
+        var history = new History(Whole);
+        var shapes = new List<Shape> { Box(1) };
+        history.Push(shapes, Whole);
+        shapes[0].Offset(50, 50);
+        var current = history.Current.shapes;
+        Assert.Equal(new PointF(1, 1), current[0].Points[0]);
+        current[0].Offset(5, 5);
+        Assert.Equal(new PointF(1, 1), history.Current.shapes[0].Points[0]);
+    }
+
+    [Fact]
+    public void History_is_bounded()
+    {
+        var history = new History(Whole);
+        for (var i = 0; i < 500; i++) history.Push([Box(i)], Whole);
+        var undos = 0;
+        while (history.Undo()) undos++;
+        Assert.Equal(199, undos);
+    }
+}
+
 public class AfterCaptureTests
 {
     [Theory]

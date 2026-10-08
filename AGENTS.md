@@ -34,7 +34,7 @@ should refer to Rust, egui, Tauri, `core/` or `app/`.
 | `Scrolling.cs` | Scrolling capture driver: wheel input, settling, border |
 | `Stitcher.cs` | Joins scrolling frames. Pure, fully tested |
 | `Editor.cs` | Annotation editor form and its `Canvas` |
-| `Shapes.cs` | `Shape`: geometry, hit testing, handles, drawing, redaction |
+| `Shapes.cs` | `Shape`: geometry, hit testing, handles, drawing, redaction; `History` (undo) |
 | `tests/ScreenX.Tests` | xunit tests for everything that needs no screen |
 
 ## Rules — each one was a real bug
