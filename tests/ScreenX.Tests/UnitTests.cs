@@ -56,7 +56,7 @@ public sealed class SettingsTests : IDisposable
     {
         var (settings, error) = Settings.Load(File);
         Assert.Null(error);
-        Assert.Equal("Control+Alt+A", settings.RegionHotkey);
+        Assert.Equal("Control+Shift+Q", settings.RegionHotkey);
         Assert.True(System.IO.File.Exists(File));
     }
 
@@ -68,7 +68,7 @@ public sealed class SettingsTests : IDisposable
         System.IO.File.WriteAllText(File, broken);
         var (settings, error) = Settings.Load(File);
         Assert.NotNull(error);
-        Assert.Equal("Control+Alt+A", settings.RegionHotkey);
+        Assert.Equal("Control+Shift+Q", settings.RegionHotkey);
         Assert.Equal(broken, System.IO.File.ReadAllText(File));
     }
 
@@ -80,7 +80,8 @@ public sealed class SettingsTests : IDisposable
         var (settings, error) = Settings.Load(File);
         Assert.Null(error);
         Assert.Equal("PrintScreen", settings.RegionHotkey);
-        Assert.Equal("Control+Alt+S", settings.ScrollHotkey);
+        Assert.Equal("", settings.ScrollHotkey);
+        Assert.Equal("editor", settings.AfterCapture);
         Assert.False(string.IsNullOrWhiteSpace(settings.Folder));
     }
 }

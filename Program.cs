@@ -83,11 +83,13 @@ sealed class Settings
 {
     public string Folder { get; set; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "ScreenX");
-    public string RegionHotkey { get; set; } = "Control+Alt+A";
-    public string ScreenHotkey { get; set; } = "Control+Alt+F";
-    public string ScrollHotkey { get; set; } = "Control+Alt+S";
-    /// "both", "copy", "save" or "editor".
-    public string AfterCapture { get; set; } = "both";
+    public string RegionHotkey { get; set; } = "Control+Shift+Q";
+    /// None by default: both are on the tray menu, and every global hotkey
+    /// is a key taken from every other program.
+    public string ScreenHotkey { get; set; } = "";
+    public string ScrollHotkey { get; set; } = "";
+    /// "editor", "both" (copy and save), "copy" or "save".
+    public string AfterCapture { get; set; } = "editor";
 
     // Not settings.json: the Rust build owns that name in the same folder and
     // rewrites it whole, which would erase these keys.
@@ -124,7 +126,7 @@ sealed class Settings
             loaded.RegionHotkey ??= "";
             loaded.ScreenHotkey ??= "";
             loaded.ScrollHotkey ??= "";
-            loaded.AfterCapture ??= "both";
+            loaded.AfterCapture ??= "editor";
             // An explicit null in the file must not become a null folder, and
             // a relative one would land wherever the working directory is:
             // System32, when Windows starts the program.

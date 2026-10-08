@@ -66,8 +66,14 @@ sealed class Editor : Form
     readonly string? path;
 
     readonly Canvas canvas = new();
-    readonly ToolStrip bar = new() { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(6, 2, 6, 2) };
-    readonly ToolStripLabel status = new() { Alignment = ToolStripItemAlignment.Right };
+    /// Flow, so a narrow window wraps the toolbar onto a second row. Laid out
+    /// in one row, Copy and Save went into the overflow menu at 800 px wide,
+    /// out of sight.
+    readonly ToolStrip bar = new()
+    {
+        GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(6, 2, 6, 2), LayoutStyle = ToolStripLayoutStyle.Flow,
+    };
+    readonly ToolStripLabel status = new();
     readonly ToolStripButton undo, redo;
 
     /// `image` is copied, so the caller keeps and disposes its own.
@@ -112,13 +118,13 @@ sealed class Editor : Form
         undo.Click += (_, _) => Undo();
         redo = new ToolStripButton("Redo") { ToolTipText = "Redo (Ctrl+Y)" };
         redo.Click += (_, _) => Redo();
-        bar.Items.AddRange([undo, redo]);
-        // Right-aligned items are laid out from the right edge inwards.
-        var save = new ToolStripButton("Save") { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Save (Ctrl+S)" };
-        save.Click += (_, _) => Save();
-        var copy = new ToolStripButton("Copy") { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Copy (Ctrl+C)" };
+        bar.Items.AddRange([undo, redo, new ToolStripSeparator()]);
+        // Copy only, without saving anything, is the everyday way out.
+        var copy = new ToolStripButton("Copy") { ToolTipText = "Copy to the clipboard, nothing saved (Ctrl+C)" };
         copy.Click += (_, _) => Copy();
-        bar.Items.AddRange([save, copy, status]);
+        var save = new ToolStripButton("Save") { ToolTipText = "Save (Ctrl+S)" };
+        save.Click += (_, _) => Save();
+        bar.Items.AddRange([copy, save, status]);
 
         Controls.Add(canvas);
         Controls.Add(bar);
@@ -137,8 +143,11 @@ sealed class Editor : Form
         var area = Screen.FromPoint(Cursor.Position).WorkingArea;
         // Min then Max rather than Clamp: on a screen smaller than the minimum,
         // Clamp throws instead of choosing.
+        // At least as wide as the toolbar in one row, so it wraps only on a
+        // screen too narrow for that.
+        var toolbarWidth = bar.GetPreferredSize(new Size(int.MaxValue, 0)).Width + 16;
         ClientSize = new Size(
-            Math.Min(Math.Max(image.Width + 40, 720), area.Width * 9 / 10),
+            Math.Min(Math.Max(image.Width + 40, Math.Max(720, toolbarWidth)), area.Width * 9 / 10),
             Math.Min(Math.Max(image.Height + bar.PreferredSize.Height + 40, 420), area.Height * 9 / 10));
         Location = new Point(area.X + (area.Width - Width) / 2, area.Y + (area.Height - Height) / 2);
 
@@ -716,21 +725,31 @@ sealed class Editor : Form
         }
     }
 
-    /// Next to the capture it was opened from, as "(edited)", so the original
-    /// is never overwritten; or a new file in the screenshots folder.
+    /// Where this editor has saved to, once it has. Later saves go there
+    /// without asking: it is this session's own file.
+    string? savedTo;
+
+    /// A capture that was never saved gets the usual name in the screenshots
+    /// folder. One opened from a file asks first: overwrite it, or save beside
+    /// it as "(edited)". After that, saving again updates the same file.
     ///
-    /// No Save As dialog yet: the common file dialog loads shell extensions
-    /// into the process, and they stay after it closes.
+    /// The question is a task dialog, not the Save As dialog: the common file
+    /// dialog loads shell extensions into the process, and they stay after it
+    /// closes.
     void Save()
     {
         try
         {
+            var target = savedTo ?? Target();
+            if (target == null) return;
             using var image = Export();
-            var target = path != null
-                ? Tray.UniquePath(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + " (edited)")
-                : Tray.UniquePath(folder, $"ScreenX_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}");
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            image.Save(target, ImageFormat.Png);
+            // Written beside it and moved over, so a failed write never leaves
+            // half a file where a good screenshot was.
+            var partial = target + ".partial";
+            image.Save(partial, FormatFor(target));
+            File.Move(partial, target, overwrite: true);
+            savedTo = target;
             dirty = false;
             status.Text = $"Saved {Path.GetFileName(target)}";
         }
@@ -739,6 +758,33 @@ sealed class Editor : Form
             status.Text = e.Message;
         }
     }
+
+    string? Target()
+    {
+        if (path == null) return Tray.UniquePath(folder, $"ScreenX_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}");
+        var beside = Tray.UniquePath(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + " (edited)",
+            Path.GetExtension(path));
+        var overwrite = new TaskDialogCommandLinkButton($"Overwrite {Path.GetFileName(path)}", "Replace the file with this edited version.");
+        var alongside = new TaskDialogCommandLinkButton($"Save alongside as {Path.GetFileName(beside)}", "Keep the original as it is.");
+        var page = new TaskDialogPage
+        {
+            Caption = "ScreenX",
+            Heading = "This screenshot is already saved",
+            Buttons = { overwrite, alongside, TaskDialogButton.Cancel },
+            DefaultButton = alongside,
+        };
+        var answer = TaskDialog.ShowDialog(this, page);
+        return answer == overwrite ? path : answer == alongside ? beside : null;
+    }
+
+    /// By extension, so overwriting a JPEG writes a JPEG.
+    static ImageFormat FormatFor(string file) => Path.GetExtension(file).ToLowerInvariant() switch
+    {
+        ".jpg" or ".jpeg" => ImageFormat.Jpeg,
+        ".bmp" => ImageFormat.Bmp,
+        ".gif" => ImageFormat.Gif,
+        _ => ImageFormat.Png,
+    };
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {

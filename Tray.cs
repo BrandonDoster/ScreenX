@@ -100,7 +100,12 @@ sealed class Tray : ApplicationContext
             var problem = hotkeys.Register(id, text);
             if (problem != null) problems.Add(problem);
         }
-        hint = $"{settings.RegionHotkey} region\n{settings.ScreenHotkey} screen\n{settings.ScrollHotkey} scrolling";
+        hint = string.Join("\n", new[]
+            {
+                (settings.RegionHotkey, "region"), (settings.ScreenHotkey, "screen"), (settings.ScrollHotkey, "scrolling"),
+            }
+            .Where(h => !string.IsNullOrWhiteSpace(h.Item1))
+            .Select(h => $"{h.Item1} {h.Item2}"));
         SetTooltip(null);
         problems.ForEach(Log);
         if (problems.Count > 0)
@@ -320,11 +325,11 @@ sealed class Tray : ApplicationContext
         ExitThread();
     }
 
-    public static string UniquePath(string folder, string stem)
+    public static string UniquePath(string folder, string stem, string extension = ".png")
     {
-        var path = Path.Combine(folder, stem + ".png");
+        var path = Path.Combine(folder, stem + extension);
         for (var n = 2; File.Exists(path); n++)
-            path = Path.Combine(folder, $"{stem} ({n}).png");
+            path = Path.Combine(folder, $"{stem} ({n}){extension}");
         return path;
     }
 

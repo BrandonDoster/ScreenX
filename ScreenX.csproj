@@ -26,6 +26,10 @@
     <PublishReadyToRun>true</PublishReadyToRun>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
+    <!-- Run on a newer .NET too, rather than demand exactly 10. Without any
+         runtime, the launcher itself shows Windows' own dialog offering the
+         Desktop Runtime download; nothing in this program is involved. -->
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
   <ItemGroup>
