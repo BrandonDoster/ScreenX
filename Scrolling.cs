@@ -21,7 +21,7 @@ static class Scrolling
     public sealed record Outcome(Frame Image, int Steps, string Ended);
 
     /// `area` is in screen pixels. Returns null if nothing was captured.
-    public static async Task<Outcome?> Run(Rectangle area)
+    public static async Task<Outcome?> Run(Rectangle area, Action<string> log)
     {
         if (area.Width < 16 || area.Height < 64) return null;
         using var border = new Border(area);
@@ -50,8 +50,10 @@ static class Scrolling
                 // The user moving the mouse means they want it back.
                 if (Cursor.Position != aim) { ended = "the mouse moved"; break; }
                 Wheel(-notches);
+                var clock = Stopwatch.StartNew();
                 var frame = await Settled(area);
                 var result = stitcher.Add(frame);
+                log($"scroll step {steps}: {notches} notches, {result}, shift {stitcher.LastShift}, settled in {clock.ElapsedMilliseconds} ms");
                 if (result == Stitcher.Result.End) { ended = "it reached the end"; break; }
                 if (result == Stitcher.Result.Lost) { ended = "it lost its place; try a smaller area"; break; }
                 // Aim for a third to two thirds of the area per step: enough
@@ -62,6 +64,7 @@ static class Scrolling
                 if ((long)stitcher.TotalHeight * area.Width > MaxPixels) { ended = "it reached the size limit"; break; }
             }
 
+            log($"scrolling capture ended after {steps} steps: {ended}");
             var pixels = stitcher.Compose();
             var image = new Frame(area.Width, stitcher.TotalHeight);
             pixels.CopyTo(image.Pixels);

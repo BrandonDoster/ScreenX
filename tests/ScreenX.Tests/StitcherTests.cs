@@ -122,6 +122,66 @@ public class StitcherTests
         Assert.Equal(100, stitcher.LastShift);
     }
 
+    /// Lines of "text": glyph-sized dark blocks on white, 18 px per line, the
+    /// way a document looks to the profile pass.
+    static float[] TextPage(int rows, int seed)
+    {
+        var random = new Random(seed);
+        var page = new float[rows * Width];
+        page.AsSpan().Fill(255);
+        for (var line = 0; line * 18 < rows; line++)
+        {
+            var x = 4;
+            while (x < Width - Scrollbar - 12)
+            {
+                var glyph = random.Next(3, 9);
+                var tall = random.Next(6, 12);
+                for (var y = line * 18 + 14 - tall; y < line * 18 + 14 && y < rows; y++)
+                for (var gx = x; gx < x + glyph; gx++)
+                    page[y * Width + gx] = 30;
+                x += glyph + random.Next(2, 10);
+            }
+        }
+        return page;
+    }
+
+    /// The page drawn at a fractional offset: each screen row a blend of the
+    /// two page rows it falls between, as antialiased text is.
+    static uint[] Blended(float[] page, double offset)
+    {
+        var frame = new uint[View * Width];
+        var whole = (int)Math.Floor(offset);
+        var t = (float)(offset - whole);
+        for (var y = 0; y < View; y++)
+        for (var x = 0; x < Width; x++)
+        {
+            var v = page[(whole + y) * Width + x] * (1 - t) + page[(whole + y + 1) * Width + x] * t;
+            var g = (uint)Math.Round(v);
+            frame[y * Width + x] = 0xFF000000 | g << 16 | g << 8 | g;
+        }
+        return frame;
+    }
+
+    [Fact]
+    public void Content_drawn_at_fractional_offsets_still_joins()
+    {
+        var page = TextPage(1400, seed: 6);
+        var stitcher = new Stitcher(Width, View, ignoreRight: 16);
+        Assert.Equal(Stitcher.Result.Added, stitcher.Add(Blended(page, 0)));
+        // Steps of about 117.4 px, each landing on a different fraction.
+        var offset = 0.0;
+        while (offset + 117.4 < 1400 - View - 2)
+        {
+            offset += 117.4;
+            Assert.Equal(Stitcher.Result.Added, stitcher.Add(Blended(page, offset)));
+            Assert.InRange(stitcher.LastShift, 116, 119);
+        }
+        // Rounding each step costs at most a row, so the page comes back within
+        // a row per step of its true length.
+        var steps = (int)(offset / 117.4);
+        Assert.InRange(stitcher.TotalHeight, (int)offset + View - steps, (int)offset + View + steps);
+    }
+
     [Fact]
     public void A_frame_of_the_wrong_size_is_refused()
     {

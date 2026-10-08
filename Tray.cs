@@ -187,7 +187,7 @@ sealed class Tray : ApplicationContext
             var area = picked.area;
             var screen = SystemInformation.VirtualScreen;
             area.Offset(screen.Location);
-            var outcome = await Scrolling.Run(area);
+            var outcome = await Scrolling.Run(area, Log);
             if (outcome == null)
             {
                 Notify("Scrolling capture", "That area is too small to scroll.", ToolTipIcon.Warning);
