@@ -137,54 +137,7 @@ sealed unsafe class Frame : IDisposable
         return view.Clone(new Rectangle(Point.Empty, rect.Size), PixelFormat.Format32bppRgb);
     }
 
-    /// Put `rect` on the clipboard as CF_DIB; Windows derives the other
-    /// bitmap formats from it.
-    ///
-    /// Not `Clipboard.SetImage` or `SetDataObject`: both leave a GDI bitmap of
-    /// the whole image inside this process. Three full-screen copies took
-    /// private memory from 11 MB to 97 MB. Handed over as an HGLOBAL, the
-    /// copy belongs to the clipboard.
-    public void CopyToClipboard(Rectangle rect, IntPtr owner)
-    {
-        var memory = Clip.GlobalAlloc(Clip.GMEM_MOVEABLE, (nuint)(40 + (long)rect.Width * rect.Height * 4));
-        if (memory == IntPtr.Zero) throw new OutOfMemoryException("could not allocate the clipboard copy");
-        var p = (byte*)Clip.GlobalLock(memory);
-        // Bottom-up: readers of CF_DIB mishandle the top-down form often
-        // enough that it is not worth the saved loop.
-        *(Gdi.BITMAPINFOHEADER*)p = new() { Size = 40, Width = rect.Width, Height = rect.Height, Planes = 1, BitCount = 32 };
-        var to = new Span<uint>(p + 40, rect.Width * rect.Height);
-        for (var y = 0; y < rect.Height; y++)
-        {
-            var src = Pixels.Slice((rect.Y + y) * Width + rect.X, rect.Width);
-            var dst = to.Slice((rect.Height - 1 - y) * rect.Width, rect.Width);
-            // The screen read leaves alpha at zero, and some programs honour
-            // it in a 32 bpp DIB and paste a transparent image.
-            for (var x = 0; x < src.Length; x++) dst[x] = src[x] | 0xFF000000;
-        }
-        Clip.GlobalUnlock(memory);
-
-        // A clipboard manager can be holding it for a moment.
-        var open = false;
-        for (var attempt = 0; attempt < 10 && !(open = Clip.OpenClipboard(owner)); attempt++) Thread.Sleep(20);
-        if (!open)
-        {
-            Clip.GlobalFree(memory);
-            throw new InvalidOperationException("the clipboard is in use by another program");
-        }
-        try
-        {
-            Clip.EmptyClipboard();
-            if (Clip.SetClipboardData(Clip.CF_DIB, memory) == IntPtr.Zero)
-            {
-                Clip.GlobalFree(memory);
-                throw new InvalidOperationException("the clipboard refused the image");
-            }
-        }
-        finally
-        {
-            Clip.CloseClipboard();
-        }
-    }
+    public void CopyToClipboard(Rectangle rect, IntPtr owner) => Clip.Copy(Pixels, Width, rect, owner);
 
     public void Dispose()
     {
@@ -194,9 +147,73 @@ sealed unsafe class Frame : IDisposable
     }
 }
 
-static class Clip
+static unsafe class Clip
 {
-    public const uint CF_DIB = 8, GMEM_MOVEABLE = 2;
+    const uint CF_DIB = 8, GMEM_MOVEABLE = 2;
+
+    public static void Copy(Bitmap image, IntPtr owner)
+    {
+        var whole = new Rectangle(Point.Empty, image.Size);
+        var data = image.LockBits(whole, ImageLockMode.ReadOnly, PixelFormat.Format32bppRgb);
+        try
+        {
+            // 32 bpp, so the stride is the width and the rows are one run.
+            Copy(new Span<uint>((void*)data.Scan0, image.Width * image.Height), image.Width, whole, owner);
+        }
+        finally
+        {
+            image.UnlockBits(data);
+        }
+    }
+
+    /// Put `rect` of an image `width` pixels wide on the clipboard as CF_DIB;
+    /// Windows derives the other bitmap formats from it.
+    ///
+    /// Not `Clipboard.SetImage` or `SetDataObject`: both leave a GDI bitmap of
+    /// the whole image inside this process. Three full-screen copies took
+    /// private memory from 11 MB to 97 MB. Handed over as an HGLOBAL, the
+    /// copy belongs to the clipboard.
+    public static void Copy(Span<uint> pixels, int width, Rectangle rect, IntPtr owner)
+    {
+        var memory = GlobalAlloc(GMEM_MOVEABLE, (nuint)(40 + (long)rect.Width * rect.Height * 4));
+        if (memory == IntPtr.Zero) throw new OutOfMemoryException("could not allocate the clipboard copy");
+        var p = (byte*)GlobalLock(memory);
+        // Bottom-up: readers of CF_DIB mishandle the top-down form often
+        // enough that it is not worth the saved loop.
+        *(Gdi.BITMAPINFOHEADER*)p = new() { Size = 40, Width = rect.Width, Height = rect.Height, Planes = 1, BitCount = 32 };
+        var to = new Span<uint>(p + 40, rect.Width * rect.Height);
+        for (var y = 0; y < rect.Height; y++)
+        {
+            var src = pixels.Slice((rect.Y + y) * width + rect.X, rect.Width);
+            var dst = to.Slice((rect.Height - 1 - y) * rect.Width, rect.Width);
+            // The screen read leaves alpha at zero, and some programs honour
+            // it in a 32 bpp DIB and paste a transparent image.
+            for (var x = 0; x < src.Length; x++) dst[x] = src[x] | 0xFF000000;
+        }
+        GlobalUnlock(memory);
+
+        // A clipboard manager can be holding it for a moment.
+        var open = false;
+        for (var attempt = 0; attempt < 10 && !(open = OpenClipboard(owner)); attempt++) Thread.Sleep(20);
+        if (!open)
+        {
+            GlobalFree(memory);
+            throw new InvalidOperationException("the clipboard is in use by another program");
+        }
+        try
+        {
+            EmptyClipboard();
+            if (SetClipboardData(CF_DIB, memory) == IntPtr.Zero)
+            {
+                GlobalFree(memory);
+                throw new InvalidOperationException("the clipboard refused the image");
+            }
+        }
+        finally
+        {
+            CloseClipboard();
+        }
+    }
 
     [DllImport("kernel32.dll")] public static extern IntPtr GlobalAlloc(uint flags, nuint bytes);
     [DllImport("kernel32.dll")] public static extern IntPtr GlobalLock(IntPtr memory);

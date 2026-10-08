@@ -19,6 +19,15 @@ static class Program
     static int Main(string[] args)
     {
         if (args is ["--selftest"]) return SelfTest();
+        // An editor on its own, for "Open with". Not the resident copy, so it
+        // ends when the window closes.
+        if (args is ["--edit", var file])
+        {
+            ApplicationConfiguration.Initialize();
+            using var image = new Bitmap(file);
+            Application.Run(new Editor(image, Path.GetDirectoryName(Path.GetFullPath(file))!, file));
+            return 0;
+        }
         // A second copy would fail to register the hotkeys and sit there doing
         // nothing, which looks exactly like a broken first copy.
         using var single = new Mutex(true, @"Local\ScreenX", out bool first);
@@ -50,7 +59,7 @@ sealed class Settings
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "ScreenX");
     public string RegionHotkey { get; set; } = "Control+Alt+A";
     public string ScreenHotkey { get; set; } = "Control+Alt+F";
-    /// "both", "copy" or "save".
+    /// "both", "copy", "save" or "editor".
     public string AfterCapture { get; set; } = "both";
 
     // Not settings.json: the Rust build owns that name in the same folder and
@@ -92,11 +101,16 @@ sealed class Tray : ApplicationContext
     Settings settings = new();
     string hint = "";
     string? lastSaved;
+    /// What clicking the notification on screen opens. Cleared by any other
+    /// notification, so clicking an error does not open a screenshot.
+    string? balloonFile;
     bool busy;
 
     public Tray()
     {
         var menu = new ContextMenuStrip();
+        var edit = menu.Items.Add("Edit last screenshot", null, (_, _) => Edit(lastSaved));
+        menu.Opening += (_, _) => edit.Enabled = lastSaved != null && File.Exists(lastSaved);
         menu.Items.Add("Open screenshots folder", null, (_, _) => OpenFolder());
         menu.Items.Add("Edit settings", null, (_, _) => Shell(Settings.FilePath));
         menu.Items.Add("Reload settings", null, (_, _) => Reload());
@@ -110,10 +124,7 @@ sealed class Tray : ApplicationContext
             Visible = true,
         };
         icon.DoubleClick += (_, _) => OpenFolder();
-        icon.BalloonTipClicked += (_, _) =>
-        {
-            if (lastSaved != null) Process.Start("explorer.exe", $"/select,\"{lastSaved}\"");
-        };
+        icon.BalloonTipClicked += (_, _) => Edit(balloonFile);
         hotkeys.Pressed += id =>
         {
             if (id == RegionId) CaptureRegion();
@@ -139,7 +150,7 @@ sealed class Tray : ApplicationContext
         SetTooltip(null);
         problems.ForEach(Log);
         if (problems.Count > 0)
-            icon.ShowBalloonTip(5000, "ScreenX settings", string.Join("\n", problems), ToolTipIcon.Warning);
+            Notify("ScreenX settings", string.Join("\n", problems), ToolTipIcon.Warning);
     }
 
     /// The tooltip carries the hotkeys, and the last capture's timing so the
@@ -184,7 +195,7 @@ sealed class Tray : ApplicationContext
     void Fail(Exception e)
     {
         Log(e.ToString());
-        icon.ShowBalloonTip(5000, "ScreenX", e.Message, ToolTipIcon.Error);
+        Notify("ScreenX", e.Message, ToolTipIcon.Error);
     }
 
     /// Opt-in: create %TEMP%\screenx.log to start recording, delete it to stop.
@@ -216,6 +227,12 @@ sealed class Tray : ApplicationContext
 
     void Deliver(Frame shot, Rectangle rect)
     {
+        if (settings.AfterCapture == "editor")
+        {
+            using var image = shot.ToBitmap(rect);
+            new Editor(image, settings.Folder, null).Show();
+            return;
+        }
         var copy = settings.AfterCapture is "both" or "copy";
         var save = settings.AfterCapture is "both" or "save";
         string? path = null;
@@ -235,10 +252,33 @@ sealed class Tray : ApplicationContext
             (true, false) => "Copied",
             _ => "Saved",
         };
-        icon.ShowBalloonTip(2000, title, path != null ? Path.GetFileName(path) : $"{rect.Width} x {rect.Height}", ToolTipIcon.None);
+        // Only a saved file can be reopened; the editor reads it back from disk
+        // rather than this process keeping a copy of every screenshot in case.
+        if (path != null) Notify(title, $"{Path.GetFileName(path)}\nClick to annotate", ToolTipIcon.None, path);
+        else Notify(title, $"{rect.Width} x {rect.Height}", ToolTipIcon.None);
     }
 
-    static string UniquePath(string folder, string stem)
+    void Notify(string title, string text, ToolTipIcon kind, string? file = null)
+    {
+        balloonFile = file;
+        icon.ShowBalloonTip(kind == ToolTipIcon.None ? 3000 : 5000, title, text, kind);
+    }
+
+    void Edit(string? file)
+    {
+        if (file == null) return;
+        try
+        {
+            using var image = new Bitmap(file);
+            new Editor(image, settings.Folder, file).Show();
+        }
+        catch (Exception e) when (e is IOException or ArgumentException)
+        {
+            Notify("ScreenX", $"Could not open {Path.GetFileName(file)}: {e.Message}", ToolTipIcon.Error);
+        }
+    }
+
+    public static string UniquePath(string folder, string stem)
     {
         var path = Path.Combine(folder, stem + ".png");
         for (var n = 2; File.Exists(path); n++)

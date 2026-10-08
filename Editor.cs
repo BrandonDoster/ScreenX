@@ -1,0 +1,686 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Brandon Doster
+
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+
+namespace ScreenX;
+
+enum Tool { Select, Crop, Arrow, Rect, Ellipse, Line, Pen, Highlight, Text, Step, Redact }
+
+/// The annotation editor. Modeless, so the hotkeys keep working while it is
+/// open, and gone completely when it closes: its two bitmaps are the only
+/// large thing it holds, and both are disposed with it.
+sealed class Editor : Form
+{
+    static readonly Color[] Swatches =
+    [
+        Color.FromArgb(0xe5, 0x48, 0x4d), Color.FromArgb(0xf5, 0xa5, 0x24), Color.FromArgb(0xf7, 0xe7, 0x33),
+        Color.FromArgb(0x37, 0xb2, 0x4d), Color.FromArgb(0x3d, 0x8b, 0xfd), Color.FromArgb(0x9b, 0x59, 0xf5),
+        Color.White, Color.Black,
+    ];
+
+    static readonly (Tool tool, string label, Keys key)[] Tools =
+    [
+        (Tool.Select, "Select", Keys.V), (Tool.Arrow, "Arrow", Keys.A), (Tool.Rect, "Box", Keys.R),
+        (Tool.Ellipse, "Ellipse", Keys.E), (Tool.Line, "Line", Keys.L), (Tool.Pen, "Pen", Keys.P),
+        (Tool.Highlight, "Highlight", Keys.H), (Tool.Text, "Text", Keys.T), (Tool.Step, "Step", Keys.N),
+        (Tool.Redact, "Redact", Keys.X), (Tool.Crop, "Crop", Keys.C),
+    ];
+
+    static readonly (string label, float width)[] Sizes = [("S", 2), ("M", 4), ("L", 8)];
+
+    const int HistoryLimit = 200;
+
+    /// The capture as it arrived. Redaction samples it, so nothing drawn on
+    /// top can leak through a pixelated block.
+    readonly Bitmap source;
+    /// `source` with every committed shape drawn on it, except `live`.
+    readonly Bitmap cache;
+    List<Shape> shapes = [];
+    Rectangle crop;
+    readonly List<(List<Shape> shapes, Rectangle crop)> history = [];
+    int at;
+
+    Tool tool = Tool.Arrow;
+    Color colour = Swatches[0];
+    float width = 4;
+    float zoom = 1;
+
+    /// Being drawn or dragged right now. Painted over the cache rather than
+    /// into it, so moving it does not mean redrawing everything under it.
+    Shape? live;
+    Shape? selected;
+    PointF? grabbed;
+    bool moved;
+    TextBox? typing;
+    PointF typingAt;
+
+    /// Annotations not yet copied or saved anywhere.
+    bool dirty;
+    readonly string folder;
+    readonly string? path;
+
+    readonly Canvas canvas = new();
+    readonly ToolStrip bar = new() { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(6, 2, 6, 2) };
+    readonly ToolStripLabel status = new() { Alignment = ToolStripItemAlignment.Right };
+    readonly ToolStripButton undo, redo;
+
+    /// `image` is copied, so the caller keeps and disposes its own.
+    public Editor(Bitmap image, string folder, string? path)
+    {
+        this.folder = folder;
+        this.path = path;
+        source = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
+        using (var g = Graphics.FromImage(source))
+        {
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.DrawImageUnscaled(image, 0, 0);
+        }
+        cache = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
+        crop = new Rectangle(Point.Empty, image.Size);
+        history.Add(([], crop));
+
+        Text = "ScreenX";
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        KeyPreview = true;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        StartPosition = FormStartPosition.Manual;
+
+        void Button(ToolStripButton button, Action click)
+        {
+            button.Click += (_, _) => click();
+            bar.Items.Add(button);
+        }
+        foreach (var (t, label, key) in Tools)
+            Button(new ToolStripButton(label) { Tag = t, ToolTipText = $"{label} ({key})" }, () => SetTool(t));
+        bar.Items.Add(new ToolStripSeparator());
+        foreach (var swatch in Swatches)
+            Button(new ToolStripButton(Square(swatch)) { Tag = swatch, ToolTipText = "Colour" }, () => SetColour(swatch));
+        bar.Items.Add(new ToolStripSeparator());
+        foreach (var (label, w) in Sizes)
+            Button(new ToolStripButton(label) { Tag = w, ToolTipText = "Line and text size" }, () => SetWidth(w));
+        bar.Items.Add(new ToolStripSeparator());
+        undo = new ToolStripButton("Undo") { ToolTipText = "Undo (Ctrl+Z)" };
+        undo.Click += (_, _) => Undo();
+        redo = new ToolStripButton("Redo") { ToolTipText = "Redo (Ctrl+Y)" };
+        redo.Click += (_, _) => Redo();
+        bar.Items.AddRange([undo, redo]);
+        // Right-aligned items are laid out from the right edge inwards.
+        var save = new ToolStripButton("Save") { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Save (Ctrl+S)" };
+        save.Click += (_, _) => Save();
+        var copy = new ToolStripButton("Copy") { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Copy (Ctrl+C)" };
+        copy.Click += (_, _) => Copy();
+        bar.Items.AddRange([save, copy, status]);
+
+        Controls.Add(canvas);
+        Controls.Add(bar);
+        canvas.Dock = DockStyle.Fill;
+        canvas.BackColor = Color.FromArgb(0x20, 0x20, 0x20);
+        // Fill is laid out last, after the toolbar has taken its strip.
+        canvas.BringToFront();
+        canvas.Paint += PaintCanvas;
+        canvas.MouseDown += Down;
+        canvas.MouseMove += Drag;
+        canvas.MouseUp += Up;
+        canvas.MouseDoubleClick += DoubleClicked;
+        canvas.ZoomWheel += delta => SetZoom(zoom * (delta > 0 ? 1.25f : 0.8f));
+
+        // Sized to the image, as far as the screen it was taken on allows.
+        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        ClientSize = new Size(
+            Math.Clamp(image.Width + 40, 720, area.Width * 9 / 10),
+            Math.Clamp(image.Height + bar.PreferredSize.Height + 40, 420, area.Height * 9 / 10));
+        Location = new Point(area.X + (area.Width - Width) / 2, area.Y + (area.Height - Height) / 2);
+
+        Rebuild();
+        UpdateBar();
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        SetZoom(Fit());
+        canvas.Focus();
+    }
+
+    /// As large as the window allows, but never enlarged: growing the image
+    /// is the zoom's job, and doing it on open looks like a mistake.
+    float Fit() => Math.Min(1, Math.Min(
+        (canvas.ClientSize.Width - 24f) / crop.Width, (canvas.ClientSize.Height - 24f) / crop.Height));
+
+    void SetZoom(float next)
+    {
+        CommitText();
+        zoom = Math.Clamp(next, 0.05f, 8);
+        canvas.AutoScrollMinSize = new Size((int)(crop.Width * zoom), (int)(crop.Height * zoom));
+        Text = $"ScreenX - {crop.Width} x {crop.Height} - {zoom * 100:0}%";
+        canvas.Invalidate();
+    }
+
+    static Bitmap Square(Color colour)
+    {
+        var square = new Bitmap(16, 16);
+        using var g = Graphics.FromImage(square);
+        using var brush = new SolidBrush(colour);
+        g.FillRectangle(brush, 1, 1, 14, 14);
+        g.DrawRectangle(Pens.Gray, 1, 1, 13, 13);
+        return square;
+    }
+
+    void UpdateBar()
+    {
+        foreach (ToolStripItem item in bar.Items)
+            if (item is ToolStripButton button)
+                button.Checked = button.Tag switch
+                {
+                    Tool t => t == tool,
+                    Color c => c == colour,
+                    float w => w == width,
+                    _ => false,
+                };
+        undo.Enabled = at > 0;
+        redo.Enabled = at < history.Count - 1;
+    }
+
+    void SetTool(Tool next)
+    {
+        CommitText();
+        tool = next;
+        if (tool != Tool.Select) selected = null;
+        canvas.Cursor = tool == Tool.Select ? Cursors.Default : Cursors.Cross;
+        UpdateBar();
+        canvas.Invalidate();
+    }
+
+    /// Also recolours the selected shape, which is how a shape is fixed after
+    /// the fact.
+    void SetColour(Color next)
+    {
+        colour = next;
+        if (selected != null)
+        {
+            selected.Colour = next;
+            Commit();
+        }
+        UpdateBar();
+    }
+
+    void SetWidth(float next)
+    {
+        width = next;
+        if (selected != null)
+        {
+            selected.Width = next;
+            Commit();
+        }
+        UpdateBar();
+    }
+
+    // History. A snapshot is the shape list and the crop, never pixels, so it
+    // costs a few hundred bytes however large the capture is.
+
+    void Commit()
+    {
+        history.RemoveRange(at + 1, history.Count - at - 1);
+        history.Add((shapes.Select(s => s.Clone()).ToList(), crop));
+        if (history.Count > HistoryLimit) history.RemoveAt(0);
+        at = history.Count - 1;
+        dirty = true;
+        status.Text = "";
+        Rebuild();
+        UpdateBar();
+    }
+
+    void Restore(int index)
+    {
+        at = index;
+        shapes = history[at].shapes.Select(s => s.Clone()).ToList();
+        var cropChanged = crop != history[at].crop;
+        crop = history[at].crop;
+        selected = null;
+        dirty = true;
+        Rebuild();
+        if (cropChanged) SetZoom(Fit());
+        UpdateBar();
+    }
+
+    void Undo()
+    {
+        CommitText();
+        if (at > 0) Restore(at - 1);
+    }
+
+    void Redo()
+    {
+        if (at < history.Count - 1) Restore(at + 1);
+    }
+
+    void Rebuild()
+    {
+        using (var g = Graphics.FromImage(cache))
+        {
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.DrawImageUnscaled(source, 0, 0);
+            g.CompositingMode = CompositingMode.SourceOver;
+            foreach (var shape in shapes)
+                if (shape != live) shape.Draw(g, source);
+        }
+        canvas.Invalidate();
+    }
+
+    // Coordinates. Everything is held in image pixels; only these two
+    // functions know where the image is on screen.
+
+    Point Origin => new(
+        canvas.AutoScrollPosition.X + Math.Max(0, (canvas.ClientSize.Width - canvas.AutoScrollMinSize.Width) / 2),
+        canvas.AutoScrollPosition.Y + Math.Max(0, (canvas.ClientSize.Height - canvas.AutoScrollMinSize.Height) / 2));
+
+    /// Clamped to the image: the pointer keeps reporting past the edge, and a
+    /// box dragged off the side should stop at the side.
+    PointF ToImage(Point p)
+    {
+        var origin = Origin;
+        return new PointF(
+            Math.Clamp(crop.X + (p.X - origin.X) / zoom, crop.Left, crop.Right),
+            Math.Clamp(crop.Y + (p.Y - origin.Y) / zoom, crop.Top, crop.Bottom));
+    }
+
+    PointF ToScreen(PointF p)
+    {
+        var origin = Origin;
+        return new PointF(origin.X + (p.X - crop.X) * zoom, origin.Y + (p.Y - crop.Y) * zoom);
+    }
+
+    Shape? HitTest(PointF p)
+    {
+        for (var i = shapes.Count - 1; i >= 0; i--)
+            if (shapes[i].Hit(p, 6 / zoom)) return shapes[i];
+        return null;
+    }
+
+    // Input.
+
+    void Down(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        CommitText();
+        canvas.Focus();
+        var p = ToImage(e.Location);
+        switch (tool)
+        {
+            case Tool.Select:
+                selected = HitTest(p);
+                if (selected != null)
+                {
+                    grabbed = p;
+                    moved = false;
+                    live = selected;
+                    Rebuild();
+                }
+                canvas.Invalidate();
+                break;
+            case Tool.Text:
+                StartTyping(p, "");
+                break;
+            case Tool.Step:
+                var number = shapes.Where(s => s.Kind == Kind.Step).Select(s => s.Number).DefaultIfEmpty(0).Max() + 1;
+                shapes.Add(new Shape { Kind = Kind.Step, Colour = colour, Width = width, Points = [p], Number = number });
+                Commit();
+                break;
+            default:
+                live = new Shape
+                {
+                    // A crop is dragged out like a box and never kept as one.
+                    Kind = tool == Tool.Crop ? Kind.Rect : Enum.Parse<Kind>(tool.ToString()),
+                    Colour = colour,
+                    Width = width,
+                    Points = [p, p],
+                };
+                break;
+        }
+    }
+
+    void Drag(object? sender, MouseEventArgs e)
+    {
+        var p = ToImage(e.Location);
+        if (tool == Tool.Select && grabbed is PointF from && selected != null)
+        {
+            selected.Offset(p.X - from.X, p.Y - from.Y);
+            grabbed = p;
+            moved = true;
+            canvas.Invalidate();
+            return;
+        }
+        if (tool == Tool.Select)
+        {
+            canvas.Cursor = HitTest(p) != null ? Cursors.SizeAll : Cursors.Default;
+            return;
+        }
+        if (live == null || e.Button != MouseButtons.Left) return;
+        if (live.Kind == Kind.Pen) live.Points.Add(p);
+        else live.Points[1] = p;
+        canvas.Invalidate();
+    }
+
+    void Up(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        if (tool == Tool.Select)
+        {
+            grabbed = null;
+            live = null;
+            if (moved) Commit();
+            else Rebuild();
+            return;
+        }
+        if (live == null) return;
+        var done = live;
+        live = null;
+        if (done.Degenerate)
+        {
+            canvas.Invalidate();
+            return;
+        }
+        if (tool == Tool.Crop)
+        {
+            var box = Rectangle.Round(RectangleF.FromLTRB(
+                Math.Min(done.Points[0].X, done.Points[1].X), Math.Min(done.Points[0].Y, done.Points[1].Y),
+                Math.Max(done.Points[0].X, done.Points[1].X), Math.Max(done.Points[0].Y, done.Points[1].Y)));
+            box.Intersect(crop);
+            if (box.Width < 2 || box.Height < 2) return;
+            crop = box;
+            Commit();
+            SetZoom(Fit());
+            // One crop is the usual; going back to drawing saves a click.
+            SetTool(Tool.Arrow);
+            return;
+        }
+        shapes.Add(done);
+        Commit();
+    }
+
+    /// Double-clicking text with the select tool edits it.
+    void DoubleClicked(object? sender, MouseEventArgs e)
+    {
+        if (tool != Tool.Select || selected is not { Kind: Kind.Text } text) return;
+        shapes.Remove(text);
+        selected = null;
+        grabbed = null;
+        live = null;
+        Rebuild();
+        colour = text.Colour;
+        width = text.Width;
+        StartTyping(text.Points[0], text.Text);
+    }
+
+    // Text is typed into a real text box laid over the image, so selection,
+    // cursor keys, paste and IME all work, and becomes a shape when it is done.
+
+    void StartTyping(PointF p, string initial)
+    {
+        typingAt = p;
+        var probe = new Shape { Width = width };
+        typing = new TextBox
+        {
+            Multiline = true,
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font("Segoe UI", probe.FontSize * zoom, FontStyle.Bold, GraphicsUnit.Pixel),
+            ForeColor = colour,
+            BackColor = colour.GetBrightness() > 0.6f ? Color.FromArgb(0x30, 0x30, 0x30) : Color.White,
+            Location = Point.Round(ToScreen(p)),
+            Text = initial,
+        };
+        typing.TextChanged += (_, _) => SizeTyping();
+        typing.KeyDown += (_, e) =>
+        {
+            // Enter places it; Shift+Enter is a new line.
+            if (e.KeyCode == Keys.Enter && !e.Shift)
+            {
+                e.SuppressKeyPress = true;
+                CommitText();
+            }
+            else if (e.KeyCode == Keys.Escape)
+            {
+                e.SuppressKeyPress = true;
+                CancelText();
+            }
+        };
+        typing.Leave += (_, _) => CommitText();
+        canvas.Controls.Add(typing);
+        SizeTyping();
+        typing.Focus();
+        typing.SelectAll();
+    }
+
+    void SizeTyping()
+    {
+        if (typing == null) return;
+        var size = TextRenderer.MeasureText(typing.Text.Length == 0 ? "Text" : typing.Text + "M", typing.Font);
+        typing.Size = new Size(size.Width + 8, size.Height + 8);
+    }
+
+    void CommitText()
+    {
+        if (typing == null) return;
+        var text = typing.Text.TrimEnd('\r', '\n');
+        CancelText();
+        if (text.Length == 0) return;
+        shapes.Add(new Shape { Kind = Kind.Text, Colour = colour, Width = width, Points = [typingAt], Text = text });
+        Commit();
+    }
+
+    void CancelText()
+    {
+        if (typing == null) return;
+        var box = typing;
+        // Cleared first: removing a focused control raises Leave, which would
+        // otherwise commit the text a second time.
+        typing = null;
+        canvas.Controls.Remove(box);
+        box.Dispose();
+        canvas.Focus();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keys)
+    {
+        if (typing != null) return base.ProcessCmdKey(ref msg, keys);
+        switch (keys)
+        {
+            case Keys.Control | Keys.Z: Undo(); return true;
+            case Keys.Control | Keys.Y or Keys.Control | Keys.Shift | Keys.Z: Redo(); return true;
+            case Keys.Control | Keys.C: Copy(); return true;
+            case Keys.Control | Keys.S: Save(); return true;
+            case Keys.Control | Keys.Oemplus or Keys.Control | Keys.Add: SetZoom(zoom * 1.25f); return true;
+            case Keys.Control | Keys.OemMinus or Keys.Control | Keys.Subtract: SetZoom(zoom * 0.8f); return true;
+            case Keys.Control | Keys.D0 or Keys.Control | Keys.NumPad0: SetZoom(Fit()); return true;
+            case Keys.Delete or Keys.Back when selected != null:
+                shapes.Remove(selected);
+                selected = null;
+                Commit();
+                return true;
+            case Keys.Escape:
+                if (live != null) { live = null; canvas.Invalidate(); }
+                else if (selected != null) { selected = null; canvas.Invalidate(); }
+                else Close();
+                return true;
+        }
+        foreach (var (t, _, key) in Tools)
+            if (keys == key) { SetTool(t); return true; }
+        return base.ProcessCmdKey(ref msg, keys);
+    }
+
+    // Painting.
+
+    void PaintCanvas(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        var origin = Origin;
+        var view = new Rectangle(origin, canvas.AutoScrollMinSize);
+
+        // Only the part of the image that is inside the repaint is scaled, so
+        // a zoomed-in full-screen capture costs what the window shows.
+        var clip = Rectangle.Intersect(e.ClipRectangle, view);
+        if (!clip.IsEmpty)
+        {
+            var src = Rectangle.FromLTRB(
+                crop.X + (int)Math.Floor((clip.Left - origin.X) / zoom),
+                crop.Y + (int)Math.Floor((clip.Top - origin.Y) / zoom),
+                crop.X + (int)Math.Ceiling((clip.Right - origin.X) / zoom),
+                crop.Y + (int)Math.Ceiling((clip.Bottom - origin.Y) / zoom));
+            src.Intersect(crop);
+            var dest = RectangleF.FromLTRB(ToScreen(src.Location).X, ToScreen(src.Location).Y,
+                ToScreen(new PointF(src.Right, src.Bottom)).X, ToScreen(new PointF(src.Right, src.Bottom)).Y);
+            // ponytail: HighQualityBilinear only on the visible part; switch to
+            // a pre-scaled cache if fitting a huge capture ever feels slow.
+            g.InterpolationMode = zoom < 1 ? InterpolationMode.HighQualityBilinear : InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            g.DrawImage(cache, dest, src, GraphicsUnit.Pixel);
+        }
+
+        g.SetClip(view);
+        g.Transform = new Matrix(zoom, 0, 0, zoom, origin.X - crop.X * zoom, origin.Y - crop.Y * zoom);
+        g.PixelOffsetMode = PixelOffsetMode.Default;
+
+        if (live != null && tool == Tool.Crop)
+        {
+            DrawCropping(g, live);
+        }
+        else
+        {
+            live?.Draw(g, source);
+        }
+
+        if (selected != null)
+        {
+            using var dash = new Pen(Color.FromArgb(0x3d, 0x8b, 0xfd), 1.5f / zoom) { DashStyle = DashStyle.Dash };
+            var b = selected.Bounds;
+            b.Inflate(4 / zoom, 4 / zoom);
+            g.DrawRectangle(dash, b.X, b.Y, b.Width, b.Height);
+        }
+    }
+
+    void DrawCropping(Graphics g, Shape shape)
+    {
+        var box = RectangleF.FromLTRB(
+            Math.Min(shape.Points[0].X, shape.Points[1].X), Math.Min(shape.Points[0].Y, shape.Points[1].Y),
+            Math.Max(shape.Points[0].X, shape.Points[1].X), Math.Max(shape.Points[0].Y, shape.Points[1].Y));
+        using var shade = new SolidBrush(Color.FromArgb(140, 0, 0, 0));
+        using var outside = new Region(crop);
+        outside.Exclude(box);
+        g.FillRegion(shade, outside);
+        using var edge = new Pen(Color.White, 1.5f / zoom) { DashStyle = DashStyle.Dash };
+        g.DrawRectangle(edge, box.X, box.Y, box.Width, box.Height);
+    }
+
+    // Output.
+
+    Bitmap Export()
+    {
+        CommitText();
+        selected = null;
+        live = null;
+        Rebuild();
+        return cache.Clone(crop, PixelFormat.Format32bppArgb);
+    }
+
+    void Copy()
+    {
+        try
+        {
+            using var image = Export();
+            Clip.Copy(image, Handle);
+            dirty = false;
+            status.Text = "Copied";
+        }
+        catch (Exception e) when (e is InvalidOperationException or OutOfMemoryException)
+        {
+            status.Text = e.Message;
+        }
+    }
+
+    /// Next to the capture it was opened from, as "(edited)", so the original
+    /// is never overwritten; or a new file in the screenshots folder.
+    ///
+    /// No Save As dialog yet: the common file dialog loads shell extensions
+    /// into the process, and they stay after it closes.
+    void Save()
+    {
+        try
+        {
+            using var image = Export();
+            var target = path != null
+                ? Tray.UniquePath(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + " (edited)")
+                : Tray.UniquePath(folder, $"ScreenX_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}");
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            image.Save(target, ImageFormat.Png);
+            dirty = false;
+            status.Text = $"Saved {Path.GetFileName(target)}";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException)
+        {
+            status.Text = e.Message;
+        }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        CommitText();
+        if (dirty && e.CloseReason == CloseReason.UserClosing
+            && MessageBox.Show(this, "Close without copying or saving your changes?", "ScreenX",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            e.Cancel = true;
+        base.OnFormClosing(e);
+    }
+
+    /// A closed modeless form is disposed by WinForms, so this is where the
+    /// memory comes back. Not a BeginInvoke from OnFormClosed: that posts to
+    /// the window being destroyed, and the message is lost with it.
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            source.Dispose();
+            cache.Dispose();
+        }
+        base.Dispose(disposing);
+        // `ScreenX.` because a Form has a `Capture` property of its own.
+        if (disposing) ScreenX.Capture.GiveMemoryBack();
+    }
+}
+
+/// The scrolling surface the image is drawn on.
+///
+/// A ScrollableControl rather than a large control inside a scrolling panel:
+/// a control is double-buffered at its own size, and a capture zoomed in eight
+/// times would ask for a back buffer of hundreds of megabytes on every paint.
+/// This one is only ever the size of the window.
+sealed class Canvas : ScrollableControl
+{
+    public event Action<int>? ZoomWheel;
+
+    public Canvas()
+    {
+        AutoScroll = true;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if ((ModifierKeys & Keys.Control) != 0)
+        {
+            ZoomWheel?.Invoke(e.Delta);
+            if (e is HandledMouseEventArgs handled) handled.Handled = true;
+            return;
+        }
+        base.OnMouseWheel(e);
+    }
+
+    // Scrolling moves the image under the pointer, so the old pixels are wrong.
+    protected override void OnScroll(ScrollEventArgs se)
+    {
+        base.OnScroll(se);
+        Invalidate();
+    }
+}

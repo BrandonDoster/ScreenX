@@ -20,8 +20,27 @@ two-monitor desktop (5120x1440 + second display), approximate:
   Esc or right click cancels.
 - `Control+Alt+F`: the monitor under the pointer, no overlay.
 
-The result is copied and saved as PNG to `Pictures\ScreenX`; a notification
-shows the file name, and clicking it shows the file in Explorer.
+The result is copied and saved as PNG to `Pictures\ScreenX`. Click the
+notification, or **Edit last screenshot** in the tray menu, to annotate it.
+`ScreenX.exe --edit <file>` opens any image in the editor.
+
+## Editor
+
+| Key | Tool |
+| --- | --- |
+| V | Select: drag to move, Delete to remove, double-click text to edit |
+| A / R / E / L / P | Arrow, box, ellipse, line, pen |
+| H | Highlight |
+| T | Text: Enter places it, Shift+Enter for a new line |
+| N | Numbered step |
+| X | Redact: pixelates from the original capture, so it destroys the detail |
+| C | Crop |
+
+Ctrl+Z / Ctrl+Y undo and redo, Ctrl+C copies, Ctrl+S saves, Ctrl+wheel or
+Ctrl+plus/minus zooms, Ctrl+0 fits. Picking a colour or size with a shape
+selected changes that shape. Save writes `<name> (edited).png` beside the
+capture, so the original is never overwritten. Closing with changes that were
+neither copied nor saved asks first.
 
 ## Settings
 
