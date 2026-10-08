@@ -154,6 +154,26 @@ public class ShapeTests
     }
 
     [Fact]
+    public void Dragging_a_corner_handle_moves_only_that_corner()
+    {
+        var box = Box(10, 10, 20, 20); // corners (10,10) and (30,30)
+        Assert.Equal(4, box.Handles.Length);
+        // The top-right corner takes its X from the second point, Y from the first.
+        var topRight = box.Handles.Single(h => box.HandleAt(h) == new PointF(30, 10));
+        box.MoveHandle(topRight, new PointF(50, 0));
+        Assert.Equal(new PointF(10, 0), box.Points[0]);
+        Assert.Equal(new PointF(50, 30), box.Points[1]);
+    }
+
+    [Fact]
+    public void A_line_has_a_handle_at_each_end_and_text_has_none()
+    {
+        var line = new Shape { Kind = Kind.Arrow, Points = [new(0, 0), new(5, 9)] };
+        Assert.Equal(new[] { new PointF(0, 0), new PointF(5, 9) }, line.Handles.Select(line.HandleAt));
+        Assert.Empty(new Shape { Kind = Kind.Text, Points = [new(1, 1)] }.Handles);
+    }
+
+    [Fact]
     public void A_line_is_hit_near_it_and_not_far_from_it()
     {
         var line = new Shape { Kind = Kind.Line, Width = 2, Points = [new(0, 0), new(100, 0)] };

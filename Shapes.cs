@@ -31,6 +31,23 @@ sealed class Shape
         Kind = Kind, Colour = Colour, Width = Width, Points = [.. Points], Text = Text, Number = Number,
     };
 
+    /// Grab points for resizing. A handle names which point gives its X and
+    /// which gives its Y, so a box's four corners come from its two points.
+    public (int x, int y)[] Handles => Kind switch
+    {
+        Kind.Rect or Kind.Ellipse or Kind.Highlight or Kind.Redact => [(0, 0), (1, 0), (0, 1), (1, 1)],
+        Kind.Line or Kind.Arrow => [(0, 0), (1, 1)],
+        _ => [],
+    };
+
+    public PointF HandleAt((int x, int y) handle) => new(Points[handle.x].X, Points[handle.y].Y);
+
+    public void MoveHandle((int x, int y) handle, PointF to)
+    {
+        Points[handle.x] = new PointF(to.X, Points[handle.x].Y);
+        Points[handle.y] = new PointF(Points[handle.y].X, to.Y);
+    }
+
     public void Offset(float dx, float dy)
     {
         for (var i = 0; i < Points.Count; i++) Points[i] = new PointF(Points[i].X + dx, Points[i].Y + dy);

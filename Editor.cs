@@ -52,6 +52,10 @@ sealed class Editor : Form
     Shape? live;
     Shape? selected;
     PointF? grabbed;
+    /// The resize handle being dragged, if it is a resize and not a move.
+    (int x, int y)? handle;
+    /// Handle size on screen, whatever the zoom.
+    const float HandleSize = 9;
     bool moved;
     TextBox? typing;
     PointF typingAt;
@@ -306,6 +310,18 @@ sealed class Editor : Form
         return new PointF(origin.X + (p.X - crop.X) * zoom, origin.Y + (p.Y - crop.Y) * zoom);
     }
 
+    (int x, int y)? HandleUnder(PointF p)
+    {
+        if (selected == null) return null;
+        var reach = HandleSize / zoom;
+        foreach (var h in selected.Handles)
+        {
+            var at = selected.HandleAt(h);
+            if (Math.Abs(at.X - p.X) <= reach && Math.Abs(at.Y - p.Y) <= reach) return h;
+        }
+        return null;
+    }
+
     Shape? HitTest(PointF p)
     {
         for (var i = shapes.Count - 1; i >= 0; i--)
@@ -324,7 +340,10 @@ sealed class Editor : Form
         switch (tool)
         {
             case Tool.Select:
-                selected = HitTest(p);
+                // A handle of the selected shape first: it overlaps the shape,
+                // and grabbing it means resize rather than move.
+                handle = HandleUnder(p);
+                if (handle == null) selected = HitTest(p);
                 if (selected != null)
                 {
                     grabbed = p;
@@ -360,7 +379,8 @@ sealed class Editor : Form
         var p = ToImage(e.Location);
         if (tool == Tool.Select && grabbed is PointF from && selected != null)
         {
-            selected.Offset(p.X - from.X, p.Y - from.Y);
+            if (handle is { } h) selected.MoveHandle(h, p);
+            else selected.Offset(p.X - from.X, p.Y - from.Y);
             grabbed = p;
             moved = true;
             canvas.Invalidate();
@@ -368,7 +388,8 @@ sealed class Editor : Form
         }
         if (tool == Tool.Select)
         {
-            canvas.Cursor = HitTest(p) != null ? Cursors.SizeAll : Cursors.Default;
+            canvas.Cursor = HandleUnder(p) != null ? Cursors.Cross
+                : HitTest(p) != null ? Cursors.SizeAll : Cursors.Default;
             return;
         }
         if (live == null || e.Button != MouseButtons.Left) return;
@@ -383,6 +404,7 @@ sealed class Editor : Form
         if (tool == Tool.Select)
         {
             grabbed = null;
+            handle = null;
             live = null;
             if (moved) Commit();
             else Rebuild();
@@ -538,6 +560,7 @@ sealed class Editor : Form
                 {
                     // Mid-move: put it back where the move started.
                     grabbed = null;
+                    handle = null;
                     live = null;
                     Restore(at);
                 }
@@ -597,9 +620,22 @@ sealed class Editor : Form
         if (selected != null)
         {
             using var dash = new Pen(Color.FromArgb(0x3d, 0x8b, 0xfd), 1.5f / zoom) { DashStyle = DashStyle.Dash };
-            var b = selected.Bounds;
-            b.Inflate(4 / zoom, 4 / zoom);
-            g.DrawRectangle(dash, b.X, b.Y, b.Width, b.Height);
+            var handles = selected.Handles;
+            if (handles.Length == 0)
+            {
+                var b = selected.Bounds;
+                b.Inflate(4 / zoom, 4 / zoom);
+                g.DrawRectangle(dash, b.X, b.Y, b.Width, b.Height);
+            }
+            using var edge = new Pen(Color.FromArgb(0x3d, 0x8b, 0xfd), 1.5f / zoom);
+            var half = HandleSize / 2 / zoom;
+            foreach (var h in handles)
+            {
+                var at = selected.HandleAt(h);
+                var square = new RectangleF(at.X - half, at.Y - half, half * 2, half * 2);
+                g.FillRectangle(Brushes.White, square);
+                g.DrawRectangle(edge, square.X, square.Y, square.Width, square.Height);
+            }
         }
     }
 
