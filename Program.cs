@@ -24,6 +24,9 @@ static class Program
         // Follow the Windows light or dark setting, so the editor and the tray
         // menu match everything else on the desktop.
         Application.SetColorMode(SystemColorMode.System);
+        // The settings window's folder picker, run apart so the shell
+        // extensions it loads leave with it. See SettingsWindow.Browse.
+        if (args is ["--pick-folder", var start]) return SettingsWindow.PickFolder(start);
         // An editor on its own, for "Open with". Not the resident copy, so it
         // ends when the window closes.
         if (args is ["--edit", var file])
@@ -45,8 +48,15 @@ static class Program
         // A second copy would fail to register the hotkeys and sit there doing
         // nothing, which looks exactly like a broken first copy.
         using var single = new Mutex(true, @"Local\ScreenX", out bool first);
-        if (!first) return 0;
-        Application.Run(new Tray());
+        // Starting it again while it runs opens its settings window: the usual
+        // answer to "I launched it and nothing happened".
+        using var reopen = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ScreenX.Settings");
+        if (!first)
+        {
+            reopen.Set();
+            return 0;
+        }
+        Application.Run(new Tray(reopen));
         return 0;
     }
 }
@@ -96,7 +106,25 @@ sealed class Settings
     public static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScreenX", "screenx.json");
 
-    static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+    /// Relaxed escaping: the file is edited by hand, and the default writes
+    /// every "+" in a hotkey as +.
+    static readonly JsonSerializerOptions Json = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// Write settings the user chose in the settings window. The one place
+    /// the file is written over, and only on an explicit Save.
+    public static void Save(Settings settings, string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var partial = path + ".partial";
+        File.WriteAllText(partial, JsonSerializer.Serialize(settings, Json));
+        File.Move(partial, path, overwrite: true);
+    }
+
+    public static void Save(Settings settings) => Save(settings, FilePath);
 
     public static (Settings, string? error) Load() => Load(FilePath);
 

@@ -25,8 +25,12 @@ sealed class Tray : ApplicationContext
     string? balloonFile;
     bool busy;
 
-    public Tray()
+    /// `reopen` is set by a second launch. Waited on by the thread pool's
+    /// kernel wait, so it costs nothing until it fires.
+    public Tray(EventWaitHandle reopen)
     {
+        var ui = SynchronizationContext.Current!;
+        ThreadPool.RegisterWaitForSingleObject(reopen, (_, _) => ui.Post(_ => OpenSettings(), null), null, -1, executeOnlyOnce: false);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Capture region", null, (_, _) => Later(CaptureRegion, 0));
         menu.Items.Add("Capture region in 3 seconds", null, (_, _) => Later(CaptureRegion, 3000));
@@ -35,18 +39,10 @@ sealed class Tray : ApplicationContext
         var edit = menu.Items.Add("Edit last screenshot", null, (_, _) => Edit(lastSaved));
         menu.Items.Add("Open screenshots folder", null, (_, _) => OpenFolder());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Edit settings", null, (_, _) => Shell(Settings.FilePath));
-        menu.Items.Add("Reload settings", null, (_, _) => Reload());
-        var startup = new ToolStripMenuItem("Start with Windows");
-        startup.Click += (_, _) => SetStartup(!startup.Checked);
-        menu.Items.Add(startup);
+        menu.Items.Add("Settings...", null, (_, _) => OpenSettings());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());
-        menu.Opening += (_, _) =>
-        {
-            edit.Enabled = lastSaved != null && File.Exists(lastSaved);
-            startup.Checked = StartsWithWindows();
-        };
+        menu.Opening += (_, _) => edit.Enabled = lastSaved != null && File.Exists(lastSaved);
 
         icon = new NotifyIcon
         {
@@ -85,6 +81,32 @@ sealed class Tray : ApplicationContext
     {
         await Task.Delay(Math.Max(delay, 250));
         action();
+    }
+
+    SettingsWindow? settingsWindow;
+
+    /// One settings window at a time. The hotkeys are off while it is open,
+    /// so recording one does not set it off, and the file is read again when
+    /// it closes, which also picks up an edit made to the file by hand.
+    void OpenSettings()
+    {
+        if (settingsWindow != null)
+        {
+            settingsWindow.Activate();
+            return;
+        }
+        var (current, _) = Settings.Load();
+        foreach (var id in new[] { RegionId, ScreenId, ScrollId }) hotkeys.Register(id, "");
+        var startup = StartsWithWindows();
+        settingsWindow = new SettingsWindow(current, startup);
+        settingsWindow.FormClosed += (_, _) =>
+        {
+            if (settingsWindow.Saved && settingsWindow.StartWithWindows != startup) SetStartup(settingsWindow.StartWithWindows);
+            settingsWindow = null;
+            Reload();
+        };
+        settingsWindow.Show();
+        settingsWindow.Activate();
     }
 
     void Reload()
@@ -350,8 +372,9 @@ sealed class Tray : ApplicationContext
     }
 
     /// The settings file in its associated editor, or Notepad if .json has no
-    /// association.
-    void Shell(string path)
+    /// association. Only ever this program's own file, never a path from the
+    /// settings, which is why shell execution is acceptable here.
+    internal static void OpenSettingsFile(string path)
     {
         try
         {

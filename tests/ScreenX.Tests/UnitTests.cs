@@ -61,6 +61,20 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void Saved_settings_read_back_and_stay_readable_by_hand()
+    {
+        var chosen = new Settings { RegionHotkey = "Control+Shift+Q", ScrollHotkey = "Alt+F13", AfterCapture = "copy", Folder = folder };
+        Settings.Save(chosen, File);
+        var text = System.IO.File.ReadAllText(File);
+        Assert.Contains("Control+Shift+Q", text); // not Control+Shift+Q
+        var (loaded, error) = Settings.Load(File);
+        Assert.Null(error);
+        Assert.Equal(("Control+Shift+Q", "Alt+F13", "copy", folder),
+            (loaded.RegionHotkey, loaded.ScrollHotkey, loaded.AfterCapture, loaded.Folder));
+        Assert.False(System.IO.File.Exists(File + ".partial"));
+    }
+
+    [Fact]
     public void A_broken_file_is_reported_and_never_overwritten()
     {
         Directory.CreateDirectory(folder);
@@ -401,6 +415,28 @@ public class HistoryTests
         while (history.Undo()) undos++;
         Assert.Equal(199, undos);
     }
+}
+
+public class SettingsWindowTests
+{
+    static Settings With(string region = "Control+Shift+Q", string screen = "", string scroll = "", string folder = @"C:\Shots") =>
+        new() { RegionHotkey = region, ScreenHotkey = screen, ScrollHotkey = scroll, Folder = folder };
+
+    [Fact]
+    public void Good_settings_pass() => Assert.Null(SettingsWindow.Validate(With(screen: "PrintScreen")));
+
+    [Fact]
+    public void Two_captures_on_one_hotkey_written_differently_are_refused() =>
+        Assert.NotNull(SettingsWindow.Validate(With(region: "ctrl+shift+q", scroll: "Shift+Control+Q")));
+
+    [Fact]
+    public void A_bare_letter_is_refused() => Assert.NotNull(SettingsWindow.Validate(With(region: "Q")));
+
+    [Fact]
+    public void A_relative_folder_is_refused() => Assert.NotNull(SettingsWindow.Validate(With(folder: "Shots")));
+
+    [Fact]
+    public void Empty_hotkeys_are_allowed() => Assert.Null(SettingsWindow.Validate(With(region: "")));
 }
 
 public class AfterCaptureTests
