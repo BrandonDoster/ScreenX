@@ -19,6 +19,14 @@ two-monitor desktop (5120x1440 + second display), approximate:
   pointer) and click, or drag a rectangle. Enter takes the highlighted area;
   Esc or right click cancels.
 - `Control+Alt+F`: the monitor under the pointer, no overlay.
+- `Control+Alt+S`: scrolling capture. Choose the area as for a region (hover
+  picks a window; for a browser, drag just the page so the tabs are left out),
+  then ScreenX scrolls it with the mouse wheel and joins the frames into one
+  tall image. A sticky header or a status bar appears once. It stops at the
+  end of the page, or when you press Esc or move the mouse.
+
+The tray menu has the same captures, plus one on a 3 second delay for
+photographing another program's open menu.
 
 The result is copied and saved as PNG to `Pictures\ScreenX`. Click the
 notification, or **Edit last screenshot** in the tray menu, to annotate it.
@@ -53,6 +61,7 @@ alone, never overwritten.
   "Folder": "C:\\Users\\you\\Pictures\\ScreenX",
   "RegionHotkey": "Control+Alt+A",
   "ScreenHotkey": "Control+Alt+F",
+  "ScrollHotkey": "Control+Alt+S",
   "AfterCapture": "both"
 }
 ```
@@ -67,9 +76,14 @@ Use the Print screen key to open screen capture*.
 
 ```powershell
 dotnet build -c Release            # a few seconds
+dotnet test tests\ScreenX.Tests -c Release
 dotnet publish -c Release          # ReadyToRun, needs the .NET 10 desktop runtime
-bin\Release\net10.0-windows\win-x64\ScreenX.exe --selftest   # exit code = failures
 ```
+
+The tests cover what does not need a screen: hotkey parsing, settings
+loading, the clipboard DIB layout, frames and dimming, shapes and redaction,
+and the scrolling-capture stitcher against synthetic pages (sticky header and
+footer, a moving scrollbar thumb, text drawn at fractional offsets).
 
 Create `%TEMP%\screenx.log` to record per-capture timing and errors; delete it
 to stop.
