@@ -8,6 +8,10 @@ decision. High and critical findings are fixed, not listed. Newest at the top.
 
 | Severity | Area | Item |
 | --- | --- | --- |
+| Low-medium | Security | The screenshots folder may be a network path (`\\host\share`, a WebDAV path, a mapped drive), so captures and the folder picker would touch the network and send Windows credentials. No network *code* is involved, and saving to a NAS may be wanted. Refuse UNC and network drives in `Load` and `Validate`? Needs your call. |
+| Low | Security | Another program in your session can create `Local\ScreenX` first, and every launch then exits thinking a copy is running. Squatting the settings event is now handled (it just goes without). Adding your user SID to the names would stop the first; any program in your session can already end ScreenX, so it buys little. |
+| Low | Security | Explorer splits its command line at commas even inside quotes, so a folder path ending in a comma might open something else. Untested. Refuse `,` in the folder, or open it through the shell's "explore" verb on a parsed path. |
+| Low | Launch | Run as `dotnet ScreenX.dll` instead of `ScreenX.exe`, `Environment.ProcessPath` is dotnet.exe, so the startup entry and the folder picker point at the wrong program. The normal launch is unaffected. |
 | Medium | Testing | Mixed DPI is untested. Both physical displays are at 100% (5120x1440 and 1920x720); the remote session showed one 125% display. Everything works in physical pixels and was designed for mixed DPI, but no capture has been taken across two different scales. Needs a second scale set in Display settings, which I did not change. |
 | Low | Scrolling | The scrollbar thumb and the minimap are copied into every added strip, so the right edge of a tall capture shows a column of thumbs and minimap slices. Filling that margin with the track colour would also erase real content when the area has no scrollbar; it needs scrollbar detection. |
 | Low | Scrolling | A page with an empty gap taller than the whole capture area ends the capture at the gap (it reads as scrolling past the last line). The capture so far is kept. |

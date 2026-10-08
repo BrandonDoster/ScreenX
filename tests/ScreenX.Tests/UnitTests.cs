@@ -281,6 +281,25 @@ public class ImageTests
     public void Only_the_formats_it_needs_are_decoded(byte[] head, bool supported) =>
         Assert.Equal(supported, Images.IsSupported(head));
 
+    /// The editor's Overwrite needs the file free. A file-backed GDI+ bitmap
+    /// keeps it locked, which made Overwrite fail in --edit.
+    [Fact]
+    public void An_opened_image_does_not_hold_its_file()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"screenx-{Guid.NewGuid():N}.png");
+        using (var made = new Bitmap(4, 4)) made.Save(path, ImageFormat.Png);
+        try
+        {
+            using var image = Images.Open(path);
+            Assert.Equal(new Size(4, 4), image.Size);
+            File.WriteAllBytes(path, [1, 2, 3]); // would throw if still locked
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void A_file_with_an_image_name_but_other_contents_is_refused()
     {

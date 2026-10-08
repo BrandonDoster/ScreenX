@@ -9,6 +9,11 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
+// Every native library this program uses is a Windows one. Loading them from
+// System32 only means a DLL of the same name beside ScreenX.exe (Downloads,
+// say) is never picked up instead.
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+
 namespace ScreenX;
 
 static class Program
@@ -31,32 +36,45 @@ static class Program
         // ends when the window closes.
         if (args is ["--edit", var file])
         {
-            Bitmap image;
+            Editor editor;
             try
             {
-                image = Images.Open(file);
+                // The editor copies the pixels, so the decoded image goes as
+                // soon as it is built.
+                using var image = Images.Open(file);
+                editor = new Editor(image, Path.GetDirectoryName(Path.GetFullPath(file))!, file);
             }
             catch (Exception e) when (Images.IsLoadFailure(e))
             {
                 MessageBox.Show($"Could not open {file}: {e.Message}", "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
-            using (image)
-                Application.Run(new Editor(image, Path.GetDirectoryName(Path.GetFullPath(file))!, file));
+            Application.Run(editor);
             return 0;
         }
         // A second copy would fail to register the hotkeys and sit there doing
         // nothing, which looks exactly like a broken first copy.
         using var single = new Mutex(true, @"Local\ScreenX", out bool first);
         // Starting it again while it runs opens its settings window: the usual
-        // answer to "I launched it and nothing happened".
-        using var reopen = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ScreenX.Settings");
-        if (!first)
+        // answer to "I launched it and nothing happened". Optional: if another
+        // program holds the name as something else, this just goes without.
+        EventWaitHandle? reopen = null;
+        try
         {
-            reopen.Set();
-            return 0;
+            reopen = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ScreenX.Settings");
         }
-        Application.Run(new Tray(reopen));
+        catch (Exception e) when (e is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
+        {
+        }
+        using (reopen)
+        {
+            if (!first)
+            {
+                reopen?.Set();
+                return 0;
+            }
+            Application.Run(new Tray(reopen));
+        }
         return 0;
     }
 }
@@ -68,14 +86,29 @@ static class Images
     /// PNG, JPEG, BMP and GIF only, by their first bytes rather than the name.
     /// GDI+ would also parse EMF, WMF and TIFF, whose decoders have the
     /// longest record of security fixes, and nothing here needs them.
+    ///
+    /// The file is read once and decoded from that copy, so what was checked
+    /// is what is decoded: opening it twice let a file that changed in
+    /// between (a network share, another program) reach the other decoders.
+    /// And the result is a copy, so the file is not held open: GDI+ keeps a
+    /// file-backed image's file locked, and Save could not overwrite it.
     public static Bitmap Open(string path)
     {
-        Span<byte> head = stackalloc byte[8];
-        using (var stream = File.OpenRead(path))
-            head = head[..stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false)];
-        if (!IsSupported(head)) throw new InvalidDataException("not a PNG, JPEG, BMP or GIF image");
-        return new Bitmap(path);
+        var info = new FileInfo(path);
+        if (info.Length > MaxFileBytes) throw new InvalidDataException($"larger than {MaxFileBytes / (1 << 20)} MB");
+        var bytes = File.ReadAllBytes(path);
+        if (!IsSupported(bytes)) throw new InvalidDataException("not a PNG, JPEG, BMP or GIF image");
+        using var stream = new MemoryStream(bytes, writable: false);
+        using var decoded = new Bitmap(stream);
+        // A small file can declare enormous dimensions; the editor would then
+        // allocate two images that size.
+        if ((long)decoded.Width * decoded.Height > MaxPixels) throw new InvalidDataException($"{decoded.Width} x {decoded.Height} is too large to edit");
+        return new Bitmap(decoded);
     }
+
+    const long MaxFileBytes = 512L << 20;
+    /// Beyond a scrolling capture at its own limit, with room to spare.
+    const long MaxPixels = 100_000_000;
 
     public static bool IsSupported(ReadOnlySpan<byte> head) =>
         head.StartsWith((ReadOnlySpan<byte>)[0x89, (byte)'P', (byte)'N', (byte)'G'])

@@ -305,6 +305,9 @@ static unsafe class Clip
     public static void Copy(Span<uint> pixels, int width, Rectangle rect, IntPtr owner, byte[]? png = null)
     {
         var size = DibSize(rect);
+        // Checked before allocating, not after: a span cannot be larger, and
+        // finding out once the memory is held leaked it.
+        if (size > int.MaxValue) throw new OutOfMemoryException("too large to put on the clipboard");
         var memory = GlobalAlloc(GMEM_MOVEABLE, (nuint)size);
         if (memory == IntPtr.Zero) throw new OutOfMemoryException("could not allocate the clipboard copy");
         var p = (byte*)GlobalLock(memory);

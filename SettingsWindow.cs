@@ -175,6 +175,8 @@ sealed class SettingsWindow : Form
             {
                 ArgumentList = { "--pick-folder", folder.Text },
                 RedirectStandardOutput = true,
+                // Both ends agree on UTF-8, or a folder name outside ASCII comes back garbled.
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
                 UseShellExecute = false,
             };
             using var picker = Process.Start(start);
@@ -205,6 +207,7 @@ sealed class SettingsWindow : Form
             InitialDirectory = Directory.Exists(start) ? start : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
         };
         if (dialog.ShowDialog() != DialogResult.OK) return 1;
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.Out.Write(dialog.SelectedPath);
         Console.Out.Flush();
         return 0;

@@ -27,10 +27,11 @@ sealed class Tray : ApplicationContext
 
     /// `reopen` is set by a second launch. Waited on by the thread pool's
     /// kernel wait, so it costs nothing until it fires.
-    public Tray(EventWaitHandle reopen)
+    public Tray(EventWaitHandle? reopen)
     {
         var ui = SynchronizationContext.Current!;
-        ThreadPool.RegisterWaitForSingleObject(reopen, (_, _) => ui.Post(_ => OpenSettings(), null), null, -1, executeOnlyOnce: false);
+        if (reopen != null)
+            ThreadPool.RegisterWaitForSingleObject(reopen, (_, _) => ui.Post(_ => OpenSettings(), null), null, -1, executeOnlyOnce: false);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Capture region", null, (_, _) => Later(CaptureRegion, 0));
         menu.Items.Add("Capture region in 3 seconds", null, (_, _) => Later(CaptureRegion, 3000));
@@ -366,13 +367,18 @@ sealed class Tray : ApplicationContext
         try
         {
             Directory.CreateDirectory(settings.Folder);
-            Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { settings.Folder } })?.Dispose();
+            Process.Start(new ProcessStartInfo(WindowsProgram("explorer.exe")) { ArgumentList = { settings.Folder } })?.Dispose();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             Notify("ScreenX", $"Could not open the screenshots folder: {e.Message}", ToolTipIcon.Error);
         }
     }
+
+    /// By full path: a bare name is searched for beside ScreenX.exe and in the
+    /// working directory before System32.
+    static string WindowsProgram(string relative) =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), relative);
 
     /// The settings file in its associated editor, or Notepad if .json has no
     /// association. Only ever this program's own file, never a path from the
@@ -385,7 +391,7 @@ sealed class Tray : ApplicationContext
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            Process.Start(new ProcessStartInfo("notepad.exe") { ArgumentList = { path } })?.Dispose();
+            Process.Start(new ProcessStartInfo(WindowsProgram(@"System32\notepad.exe")) { ArgumentList = { path } })?.Dispose();
         }
     }
 

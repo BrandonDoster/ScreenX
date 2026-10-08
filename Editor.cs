@@ -747,8 +747,17 @@ sealed class Editor : Form
             // Written beside it and moved over, so a failed write never leaves
             // half a file where a good screenshot was.
             var partial = target + ".partial";
-            image.Save(partial, FormatFor(target));
-            File.Move(partial, target, overwrite: true);
+            try
+            {
+                image.Save(partial, FormatFor(target));
+                File.Move(partial, target, overwrite: true);
+            }
+            finally
+            {
+                // Its own temporary file, never the user's: gone whether the
+                // save worked or not.
+                if (File.Exists(partial)) File.Delete(partial);
+            }
             savedTo = target;
             dirty = false;
             status.Text = $"Saved {Path.GetFileName(target)}";
