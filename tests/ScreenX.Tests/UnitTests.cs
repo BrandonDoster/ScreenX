@@ -106,6 +106,21 @@ public class ClipboardTests
     }
 
     [Fact]
+    public void A_rectangle_far_down_a_tall_image_is_packed_from_the_right_rows()
+    {
+        const int width = 5, height = 30_010;
+        var pixels = new uint[width * height];
+        for (var i = 0; i < pixels.Length; i++) pixels[i] = (uint)i & 0x00FFFFFF;
+        var rect = new Rectangle(2, 30_000, 2, 3);
+        var dib = new byte[Clip.DibSize(rect)];
+        Clip.PackDib(pixels, width, rect, dib);
+        var rows = MemoryMarshal.Cast<byte, uint>(dib.AsSpan(40)).ToArray();
+        // Bottom row (30002) first.
+        Assert.Equal(0xFF000000u | (uint)(30_002 * width + 2), rows[0]);
+        Assert.Equal(0xFF000000u | (uint)(30_000 * width + 3), rows[^1]);
+    }
+
+    [Fact]
     public void A_rectangle_outside_the_image_is_refused()
     {
         var pixels = new uint[12];
@@ -323,6 +338,21 @@ public sealed class FolderSettingsTests : IDisposable
         var (settings, _) = Settings.Load(File);
         Assert.Equal("", settings.ScrollHotkey);
     }
+}
+
+public class AfterCaptureTests
+{
+    [Theory]
+    [InlineData("both", true, true, false)]
+    [InlineData("Both", true, true, false)]
+    [InlineData(" copy ", true, false, false)]
+    [InlineData("save", false, true, false)]
+    [InlineData("editor", false, false, true)]
+    [InlineData("clipboard", false, true, false)] // the old build's word: saved, not lost
+    [InlineData("", false, true, false)]
+    [InlineData(null, false, true, false)]
+    public void Each_value_does_what_it_says_and_anything_else_saves(string? value, bool copy, bool save, bool edit) =>
+        Assert.Equal((copy, save, edit), Tray.Actions(value));
 }
 
 public sealed class PathTests : IDisposable

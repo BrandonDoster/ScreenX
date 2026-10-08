@@ -16,20 +16,33 @@ static class Capture
     public static Frame Grab(Rectangle area)
     {
         var frame = new Frame(area.Width, area.Height);
+        try
+        {
+            GrabInto(frame, area);
+        }
+        catch
+        {
+            frame.Dispose();
+            throw;
+        }
+        return frame;
+    }
+
+    /// The same, into a frame that already exists, for a run of captures of
+    /// one area that would otherwise allocate a new surface each time.
+    public static void GrabInto(Frame frame, Rectangle area)
+    {
+        if (frame.Width != area.Width || frame.Height != area.Height) throw new ArgumentException("frame and area differ in size");
         var screen = Gdi.GetDC(IntPtr.Zero);
         try
         {
             if (!Gdi.BitBlt(frame.Dc, 0, 0, area.Width, area.Height, screen, area.X, area.Y, Gdi.SRCCOPY | Gdi.CAPTUREBLT))
-            {
-                frame.Dispose();
                 throw new InvalidOperationException($"could not read the screen (error {Marshal.GetLastWin32Error()})");
-            }
         }
         finally
         {
             Gdi.ReleaseDC(IntPtr.Zero, screen);
         }
-        return frame;
     }
 
     /// Visible top-level windows, front-most first, relative to `area`.
@@ -279,6 +292,9 @@ static class Gdi
     [DllImport("gdi32.dll")]
     public static extern IntPtr CreateDIBSection(IntPtr dc, ref BITMAPINFOHEADER info, uint usage, out IntPtr bits, IntPtr section, uint offset);
     public const int COLORONCOLOR = 3;
+    public const uint BLACKNESS = 0x00000042;
+
+    [DllImport("gdi32.dll")] public static extern bool PatBlt(IntPtr dc, int x, int y, int width, int height, uint rop);
 
     [DllImport("gdi32.dll")] public static extern int ExcludeClipRect(IntPtr dc, int left, int top, int right, int bottom);
     [DllImport("gdi32.dll")] public static extern int SetStretchBltMode(IntPtr dc, int mode);

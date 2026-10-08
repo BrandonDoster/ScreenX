@@ -239,9 +239,18 @@ sealed class Overlay : Form
             }
             if (magnifier is Rectangle m && pointer is Point p && m.IntersectsWith(clip))
             {
-                Gdi.SetStretchBltMode(hdc, Gdi.COLORONCOLOR);
-                Gdi.StretchBlt(hdc, m.X, m.Y, m.Width, m.Width, shot.Dc, p.X - Reach, p.Y - Reach,
-                    Reach * 2 + 1, Reach * 2 + 1, Gdi.SRCCOPY);
+                // Black where the reach goes past the edge of the capture:
+                // reading outside a DIB gives whatever is there.
+                Gdi.PatBlt(hdc, m.X, m.Y, m.Width, m.Width, Gdi.BLACKNESS);
+                var want = new Rectangle(p.X - Reach, p.Y - Reach, Reach * 2 + 1, Reach * 2 + 1);
+                var have = Rectangle.Intersect(want, new Rectangle(0, 0, shot.Width, shot.Height));
+                if (!have.IsEmpty)
+                {
+                    var zoom = Zoom;
+                    Gdi.SetStretchBltMode(hdc, Gdi.COLORONCOLOR);
+                    Gdi.StretchBlt(hdc, m.X + (have.X - want.X) * zoom, m.Y + (have.Y - want.Y) * zoom,
+                        have.Width * zoom, have.Height * zoom, shot.Dc, have.X, have.Y, have.Width, have.Height, Gdi.SRCCOPY);
+                }
             }
         }
         finally

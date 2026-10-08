@@ -235,16 +235,13 @@ sealed class Tray : ApplicationContext
 
     void Deliver(Frame shot, Rectangle rect, string? note)
     {
-        if (settings.AfterCapture == "editor")
+        var (copy, save, edit) = Actions(settings.AfterCapture);
+        if (edit)
         {
             using var image = shot.ToBitmap(rect);
             new Editor(image, settings.Folder, null).Show();
             return;
         }
-        var copy = settings.AfterCapture is "both" or "copy";
-        // Anything unrecognised saves: losing a screenshot to a typo in the
-        // settings is worse than an unwanted file.
-        var save = !copy || settings.AfterCapture == "both";
         string? path = null;
         if (save)
         {
@@ -269,6 +266,18 @@ sealed class Tray : ApplicationContext
         else Notify(title, detail, ToolTipIcon.None);
     }
 
+    /// What `AfterCapture` asks for. Case does not matter, and anything
+    /// unrecognised saves: losing a screenshot to a typo in the settings is
+    /// worse than an unwanted file.
+    internal static (bool copy, bool save, bool edit) Actions(string? afterCapture) =>
+        afterCapture?.Trim().ToLowerInvariant() switch
+        {
+            "editor" => (false, false, true),
+            "copy" => (true, false, false),
+            "both" => (true, true, false),
+            _ => (false, true, false),
+        };
+
     void Notify(string title, string text, ToolTipIcon kind, string? file = null)
     {
         balloonFile = file;
@@ -277,7 +286,8 @@ sealed class Tray : ApplicationContext
 
     void Edit(string? file)
     {
-        if (file == null || !File.Exists(file)) return;
+        // Not over a scrolling capture in progress, which would photograph it.
+        if (busy || file == null || !File.Exists(file)) return;
         try
         {
             using var image = Images.Open(file);
@@ -294,6 +304,14 @@ sealed class Tray : ApplicationContext
     /// close first, and any one of them can keep the program running.
     void Quit()
     {
+        // A scrolling capture still has a continuation waiting; ending the
+        // thread under it loses the capture and strands the cursor. Reaching
+        // the tray menu moved the mouse, which already stops it.
+        if (busy)
+        {
+            Later(Quit, 500);
+            return;
+        }
         foreach (var editor in Application.OpenForms.OfType<Editor>().ToList())
         {
             editor.Close();
@@ -347,7 +365,7 @@ sealed class Tray : ApplicationContext
     static bool StartsWithWindows()
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-        return key?.GetValue("ScreenX") as string == RunCommand;
+        return string.Equals(key?.GetValue("ScreenX") as string, RunCommand, StringComparison.OrdinalIgnoreCase);
     }
 
     void SetStartup(bool on)

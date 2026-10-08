@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Brandon Doster
 
+using System.Numerics;
+
 namespace ScreenX;
 
 /// Joins the frames of a scrolling capture into one tall image.
@@ -9,10 +11,13 @@ namespace ScreenX;
 /// tested without a screen. Every frame is the same region of the screen,
 /// taken after scrolling down.
 ///
-/// A frame splits into three bands. The header and footer are rows that did
-/// not change between the first two frames (a toolbar, a sticky nav bar, a
-/// status bar) and appear once. The band between them is what scrolled, and
-/// each new frame adds the rows it brought into view.
+/// A frame splits into three bands. The header is rows that did not change
+/// since the previous frame (a toolbar, a sticky nav bar), worked out again for
+/// every pair, because a sticky header often appears only once the page has
+/// scrolled. The footer (a status bar) is fixed by the first pair, because the
+/// strips are cut from just above it and must stay continuous. The band
+/// between them is what scrolled, and each new frame adds the rows it brought
+/// into view at the bottom of it.
 ///
 /// Rows are matched exactly first, by hash. That is not enough on its own:
 /// DirectWrite and WinUI place text at fractional positions, so Notepad
@@ -30,6 +35,9 @@ sealed class Stitcher
     /// How many overlapping rows must agree exactly to accept an offset. Not
     /// all of them: a blinking caret or an animation changes a few.
     const double MinAgreement = 0.9;
+    /// Offsets within this much of the best are rivals for it. Two rivals far
+    /// apart mean the content repeats and either could be right.
+    const double RivalMargin = 0.02;
     const int MinInformativeRows = 8;
     /// Mean brightness difference per profile bin, 0-255, below which two rows
     /// are the same row drawn at a slightly different position.
@@ -46,7 +54,7 @@ sealed class Stitcher
 
     uint[]? first, previous;
     Rows? last;
-    int top = -1, bottom;
+    int top, bottom = -1;
     readonly List<uint[]> added = [];
     int addedRows;
     int lastShift;
@@ -65,6 +73,16 @@ sealed class Stitcher
     /// The most recent offset, in rows; 0 before the first scroll.
     public int LastShift => lastShift;
 
+    int Band => Height - top - Math.Max(0, bottom);
+
+    /// Overlap is what an offset is proved by. A small one is proved by a
+    /// handful of rows, which repeat by coincidence often enough to matter.
+    int MinOverlap(int band) => Math.Max(MinInformativeRows, band / 4);
+
+    /// The largest scroll that can still be matched. The driver keeps its
+    /// steps below this.
+    public int MaxShift => Band - MinOverlap(Band);
+
     /// Everything about a frame's rows that matching needs.
     sealed record Rows(int[] Hashes, float[] Profiles, bool[] Flat);
 
@@ -78,22 +96,28 @@ sealed class Stitcher
             last = rows;
             return Result.Added;
         }
+        if (rows.Hashes.AsSpan().SequenceEqual(last.Hashes)) return Result.End;
 
-        if (top < 0)
+        var limit = (int)(Height * MaxStaticShare);
+        if (bottom < 0)
         {
-            if (rows.Hashes.AsSpan().SequenceEqual(last.Hashes)) return Result.End;
-            FindStatic(last.Hashes, rows.Hashes);
+            bottom = 0;
+            while (bottom < limit && last.Hashes[Height - 1 - bottom] == rows.Hashes[Height - 1 - bottom]) bottom++;
         }
+        top = 0;
+        while (top < limit && top < Height - bottom - 2 * MinInformativeRows && last.Hashes[top] == rows.Hashes[top]) top++;
 
-        var band = Height - top - bottom;
+        var band = Band;
         var shift = ExactShift(last, rows, band);
+        if (shift == Ambiguous) return Result.Lost;
         if (shift < 0) shift = NearShift(last, rows, band);
         if (shift == 0) return Result.End;
         if (shift < 0) return Result.Lost;
 
-        // The new rows are the bottom `shift` rows of this frame's band.
+        // The new rows are the bottom `shift` rows of this frame's band, just
+        // above the footer.
         var strip = new uint[shift * Width];
-        Array.Copy(frame, (top + band - shift) * Width, strip, 0, strip.Length);
+        Array.Copy(frame, (Height - bottom - shift) * Width, strip, 0, strip.Length);
         added.Add(strip);
         addedRows += shift;
         lastShift = shift;
@@ -102,14 +126,14 @@ sealed class Stitcher
         return Result.Added;
     }
 
-    void FindStatic(int[] a, int[] b)
-    {
-        var limit = (int)(Height * MaxStaticShare);
-        top = 0;
-        while (top < limit && a[top] == b[top]) top++;
-        bottom = 0;
-        while (bottom < limit && a[Height - 1 - bottom] == b[Height - 1 - bottom]) bottom++;
-    }
+    const int Ambiguous = -2;
+
+    /// Where in an overlap of `rows` the comparison starts. Only its lower
+    /// part is judged: a sticky header that appears once the page has scrolled
+    /// covers the top of the new frame, and on that first pair it is not yet
+    /// known to be a header. Matching from the bottom, where new content
+    /// arrives, is what ShareX does too.
+    static int Judged(int rows) => rows * 2 / 5;
 
     /// Prefer the shift nearest the last one when two fit equally: a page of
     /// repeating rows fits several offsets, and the scroll amount barely
@@ -117,31 +141,41 @@ sealed class Stitcher
     bool Nearer(int shift, int than) => Math.Abs(shift - lastShift) < Math.Abs(than - lastShift);
 
     /// The rows the band moved up between `a` and `b` by exact match: 0 if it
-    /// did not move, -1 if no offset fits well enough.
+    /// did not move, -1 if no offset fits well enough, `Ambiguous` if several
+    /// unrelated offsets fit and nothing says which.
     int ExactShift(Rows a, Rows b, int band)
     {
+        var scores = new double[band];
         var best = -1;
-        var bestScore = 0.0;
-        for (var shift = 0; shift < band - MinInformativeRows; shift++)
+        for (var shift = 0; shift <= band - MinOverlap(band); shift++)
         {
             int compared = 0, agreed = 0;
-            for (var i = 0; i < band - shift; i++)
+            for (var i = Judged(band - shift); i < band - shift; i++)
             {
                 // Rows of one flat colour match anywhere and prove nothing.
                 if (a.Flat[top + i + shift]) continue;
                 compared++;
                 if (a.Hashes[top + i + shift] == b.Hashes[top + i]) agreed++;
             }
-            if (compared < MinInformativeRows) continue;
-            var score = (double)agreed / compared;
-            if (shift == 0 && score == 1) return 0;
-            if (score > bestScore + 1e-9 || (Math.Abs(score - bestScore) <= 1e-9 && Nearer(shift, best)))
-            {
+            scores[shift] = compared < MinInformativeRows ? 0 : (double)agreed / compared;
+            if (shift == 0 && scores[0] == 1) return 0;
+            if (best < 0 || scores[shift] > scores[best] + 1e-9
+                || (Math.Abs(scores[shift] - scores[best]) <= 1e-9 && Nearer(shift, best)))
                 best = shift;
-                bestScore = score;
-            }
         }
-        return bestScore >= MinAgreement ? best : -1;
+        if (best < 0 || scores[best] < MinAgreement) return -1;
+
+        // Repeating content (a grid, a list of identical rows) fits every
+        // multiple of its period. Once the scroll amount is known, the rival
+        // nearest it wins; before that, a guess would silently duplicate or
+        // drop rows, so it is refused.
+        var rivals = Enumerable.Range(0, scores.Length)
+            .Where(s => scores[s] >= Math.Max(MinAgreement, scores[best] - RivalMargin) && Math.Abs(s - best) > 2)
+            .ToList();
+        if (rivals.Count == 0) return best;
+        if (lastShift == 0) return Ambiguous;
+        rivals.Add(best);
+        return rivals.MinBy(s => Math.Abs(s - lastShift));
     }
 
     /// The same, by brightness profile, for content drawn at fractional
@@ -150,11 +184,11 @@ sealed class Stitcher
     {
         var distances = new float[band];
         distances.AsSpan().Fill(float.MaxValue);
-        for (var shift = 0; shift < band - MinInformativeRows; shift++)
+        for (var shift = 0; shift <= band - MinOverlap(band); shift++)
         {
             double sum = 0;
             var compared = 0;
-            for (var i = 0; i < band - shift; i++)
+            for (var i = Judged(band - shift); i < band - shift; i++)
             {
                 var row = top + i + shift;
                 if (a.Flat[row]) continue;
@@ -180,10 +214,16 @@ sealed class Stitcher
         return distances[best] <= runnerUp * MinProfileMargin ? best : -1;
     }
 
+    /// Mean absolute difference. Vectorised: on a tall area this runs a few
+    /// hundred million times per step.
     static float Distance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-        float sum = 0;
-        for (var i = 0; i < a.Length; i++) sum += Math.Abs(a[i] - b[i]);
+        var total = Vector<float>.Zero;
+        var i = 0;
+        for (; i <= a.Length - Vector<float>.Count; i += Vector<float>.Count)
+            total += Vector.Abs(new Vector<float>(a[i..]) - new Vector<float>(b[i..]));
+        var sum = Vector.Sum(total);
+        for (; i < a.Length; i++) sum += Math.Abs(a[i] - b[i]);
         return sum / a.Length;
     }
 
@@ -205,7 +245,7 @@ sealed class Stitcher
             {
                 var total = 0;
                 foreach (var p in row.Slice(bin * perBin, perBin))
-                    total += (int)(((p >> 16) & 0xFF) * 3 + ((p >> 8) & 0xFF) * 6 + (p & 0xFF)) ;
+                    total += (int)(((p >> 16) & 0xFF) * 3 + ((p >> 8) & 0xFF) * 6 + (p & 0xFF));
                 var mean = total / (perBin * 10f);
                 profiles[y * bins + bin] = mean;
                 low = Math.Min(low, mean);
@@ -217,22 +257,30 @@ sealed class Stitcher
         return new Rows(hashes, profiles, flat);
     }
 
-    /// The finished image: header and band of the first frame, every added
-    /// strip, then the footer as it was last seen.
-    public uint[] Compose()
+    /// The finished image: the first frame down to the footer, every added
+    /// strip, then the footer as it was last seen. Written into `output`, which
+    /// must hold `TotalHeight` rows, so the caller can put it straight where it
+    /// is needed instead of holding a second copy of a tall image.
+    public void Compose(Span<uint> output)
     {
-        if (first == null || previous == null) return [];
-        var output = new uint[TotalHeight * Width];
+        if (first == null || previous == null) return;
+        if (output.Length < TotalHeight * Width) throw new ArgumentException("output too small", nameof(output));
         var footer = Math.Max(0, bottom);
         var head = Height - footer;
-        Array.Copy(first, 0, output, 0, head * Width);
+        first.AsSpan(0, head * Width).CopyTo(output);
         var at = head * Width;
         foreach (var strip in added)
         {
-            Array.Copy(strip, 0, output, at, strip.Length);
+            strip.CopyTo(output[at..]);
             at += strip.Length;
         }
-        Array.Copy(previous, head * Width, output, at, footer * Width);
+        previous.AsSpan(head * Width, footer * Width).CopyTo(output[at..]);
+    }
+
+    public uint[] Compose()
+    {
+        var output = new uint[TotalHeight * Width];
+        Compose(output);
         return output;
     }
 }

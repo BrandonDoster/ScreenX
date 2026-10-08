@@ -227,7 +227,12 @@ sealed class Editor : Form
     void SetColour(Color next)
     {
         colour = next;
-        if (selected != null)
+        if (typing != null)
+        {
+            // Applies to the text being typed, kept when it is committed.
+            typing.ForeColor = next;
+        }
+        else if (selected != null)
         {
             selected.Colour = next;
             Commit();
@@ -238,7 +243,14 @@ sealed class Editor : Form
     void SetWidth(float next)
     {
         width = next;
-        if (selected != null)
+        if (typing != null)
+        {
+            var old = typing.Font;
+            typing.Font = new Font("Segoe UI", new Shape { Width = next }.FontSize * zoom, FontStyle.Bold, GraphicsUnit.Pixel);
+            old.Dispose();
+            SizeTyping();
+        }
+        else if (selected != null)
         {
             selected.Width = next;
             Commit();
@@ -261,14 +273,16 @@ sealed class Editor : Form
         UpdateBar();
     }
 
-    void Restore(int index)
+    /// `changes` is false when this only puts back what is already the
+    /// current step, so closing afterwards does not ask about nothing.
+    void Restore(int index, bool changes = true)
     {
         at = index;
         shapes = history[at].shapes.Select(s => s.Clone()).ToList();
         var cropChanged = crop != history[at].crop;
         crop = history[at].crop;
         selected = null;
-        dirty = true;
+        if (changes) dirty = true;
         Rebuild();
         if (cropChanged) SetZoom(Fit());
         UpdateBar();
@@ -412,6 +426,14 @@ sealed class Editor : Form
     void Up(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
+        if (tool == Tool.Select && typing != null)
+        {
+            // The release of a double-click that opened text for retyping.
+            // `live` stays on that text so it is not drawn under the box.
+            grabbed = null;
+            handle = null;
+            return;
+        }
         if (tool == Tool.Select)
         {
             grabbed = null;
@@ -519,9 +541,14 @@ sealed class Editor : Form
         if (original != null)
         {
             // Retyped: changed in place, or deleted by emptying it.
-            if (text == original.Text) return;
+            if (text == original.Text && colour == original.Colour && width == original.Width) return;
             if (text.Length == 0) shapes.Remove(original);
-            else original.Text = text;
+            else
+            {
+                original.Text = text;
+                original.Colour = colour;
+                original.Width = width;
+            }
             Commit();
             return;
         }
@@ -552,6 +579,10 @@ sealed class Editor : Form
     protected override bool ProcessCmdKey(ref Message msg, Keys keys)
     {
         if (typing != null) return base.ProcessCmdKey(ref msg, keys);
+        // Mid-drag, only Esc: an undo or a delete would pull the shape being
+        // dragged out from under the mouse, and the release would then commit
+        // a step that no longer matches anything.
+        if ((grabbed != null || (live != null && live != editing)) && keys != Keys.Escape) return true;
         switch (keys)
         {
             case Keys.Control | Keys.Z: Undo(); return true;
@@ -573,7 +604,7 @@ sealed class Editor : Form
                     grabbed = null;
                     handle = null;
                     live = null;
-                    Restore(at);
+                    Restore(at, changes: false);
                 }
                 else if (live != null) { live = null; canvas.Invalidate(); }
                 else if (selected != null) { selected = null; canvas.Invalidate(); }

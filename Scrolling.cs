@@ -14,9 +14,11 @@ namespace ScreenX;
 static class Scrolling
 {
     /// Enough for a long page, small enough not to take the machine with it:
-    /// a 2000 px wide capture at this limit is about 400 MB while it is built.
+    /// a 2000 px wide capture at this limit holds about 200 MB of strips and
+    /// 200 MB of finished image.
     const long MaxPixels = 50_000_000;
     const int MaxSteps = 400;
+    static readonly TimeSpan MaxTime = TimeSpan.FromMinutes(3);
 
     public sealed record Outcome(Frame Image, int Steps, string Ended);
 
@@ -26,89 +28,157 @@ static class Scrolling
         if (area.Width < 16 || area.Height < 64) return null;
         using var border = new Border(area);
         border.Show();
+        using var surface = new Frame(area.Width, area.Height);
+        // Clears the "pressed since last asked" bit, which an Esc from some
+        // earlier moment would otherwise set and stop this before it starts.
+        Escape();
 
         var restore = Cursor.Position;
         // Over the area, so the wheel reaches it, but near the right edge,
         // away from content that reacts to hover.
         var aim = new Point(area.Right - Math.Min(40, area.Width / 4), area.Y + area.Height / 2);
         Cursor.Position = aim;
+        // With "scroll inactive windows" turned off, the wheel goes to the
+        // focused window, which after the overlay is not necessarily this one.
+        SetForegroundWindow(GetAncestor(WindowFromPoint(aim), GA_ROOT));
         try
         {
             // Let whatever the overlay covered finish repainting.
             await Task.Delay(150);
             // Wide enough for a scrollbar at 200% scale; ShareX settles on a
             // similar margin.
-            var stitcher = new Stitcher(area.Width, area.Height, ignoreRight: Math.Max(24, area.Width / 20));
-            stitcher.Add(await Settled(area));
+            var ignoreRight = Math.Max(24, area.Width / 20);
+            var stitcher = new Stitcher(area.Width, area.Height, ignoreRight);
+            var compare = area.Width - Math.Min(ignoreRight, area.Width / 2);
+            var current = await Settled(area, surface, null, compare);
+            if (current == null) return null;
+            stitcher.Add(current);
 
-            var notches = 3;
+            var notches = 2;
+            var retries = 0;
             var ended = "it reached the step limit";
             var steps = 0;
+            var clock = Stopwatch.StartNew();
             for (; steps < MaxSteps; steps++)
             {
                 if (Escape()) { ended = "stopped"; break; }
                 // The user moving the mouse means they want it back.
                 if (Cursor.Position != aim) { ended = "the mouse moved"; break; }
-                Wheel(-notches);
-                var clock = Stopwatch.StartNew();
-                var frame = await Settled(area);
-                var result = stitcher.Add(frame);
-                log($"scroll step {steps}: {notches} notches, {result}, shift {stitcher.LastShift}, settled in {clock.ElapsedMilliseconds} ms");
+                if (clock.Elapsed > MaxTime) { ended = "it reached the time limit"; break; }
+                if (!Wheel(-notches))
+                {
+                    ended = "Windows refused the scroll (the window may be running as administrator)";
+                    break;
+                }
+                var step = Stopwatch.StartNew();
+                var frame = await Settled(area, surface, current, compare);
+                if (frame == null) { ended = "stopped"; break; }
+                // Matching a tall area can take a noticeable fraction of a
+                // second, and the stitcher is pure, so it runs off the UI thread.
+                var result = await Task.Run(() => stitcher.Add(frame));
+                log($"scroll step {steps}: {notches} notches, {result}, shift {stitcher.LastShift}, {step.ElapsedMilliseconds} ms");
                 if (result == Stitcher.Result.End) { ended = "it reached the end"; break; }
-                if (result == Stitcher.Result.Lost) { ended = "it lost its place; try a smaller area"; break; }
-                // Aim for a third to two thirds of the area per step: enough
-                // overlap to match, not so little that it takes forever.
+                if (result == Stitcher.Result.Lost)
+                {
+                    // Usually a step too big to overlap. Scroll back, halve it,
+                    // and try again from the frame that is still the last good one.
+                    if (notches == 1 || retries++ == 2) { ended = "it lost its place; try a smaller area"; break; }
+                    Wheel(notches);
+                    notches = Math.Max(1, notches / 2);
+                    if (await Settled(area, surface, frame, compare) == null) { ended = "stopped"; break; }
+                    continue;
+                }
+                current = frame;
+                retries = 0;
+                // Aim for a third to four fifths of what can still be matched:
+                // enough overlap to be sure, not so little it takes forever.
                 var shift = stitcher.LastShift;
-                if (shift < area.Height / 3 && notches < 10) notches++;
-                else if (shift > area.Height * 2 / 3 && notches > 1) notches--;
+                if (shift < stitcher.MaxShift / 3 && notches < 15) notches++;
+                else if (shift > stitcher.MaxShift * 4 / 5 && notches > 1) notches--;
                 if ((long)stitcher.TotalHeight * area.Width > MaxPixels) { ended = "it reached the size limit"; break; }
             }
 
             log($"scrolling capture ended after {steps} steps: {ended}");
-            var pixels = stitcher.Compose();
             var image = new Frame(area.Width, stitcher.TotalHeight);
-            pixels.CopyTo(image.Pixels);
+            stitcher.Compose(image.Pixels);
             return new Outcome(image, steps, ended);
         }
         finally
         {
-            Cursor.Position = restore;
+            // Not if the user has taken the mouse back: pulling it away from
+            // them again is worse than leaving it where it is.
+            if (Cursor.Position == aim) Cursor.Position = restore;
         }
     }
 
     /// A capture of `area` once it has stopped changing: smooth scrolling and
-    /// lazy loading both keep painting after the wheel event is handled.
-    static async Task<uint[]> Settled(Rectangle area)
+    /// lazy loading both keep painting after the wheel event is handled. Null
+    /// if Esc was pressed while waiting.
+    ///
+    /// With `before`, it first waits for the picture to differ from it. A slow
+    /// application (Word, Visual Studio) may not have repainted within the
+    /// first poll, and its unscrolled frame would read as the end of the page.
+    /// Only the columns the stitcher matches are compared, so a scrollbar
+    /// fading in and out does not count as change.
+    static async Task<uint[]?> Settled(Rectangle area, Frame surface, uint[]? before, int compare)
     {
         var clock = Stopwatch.StartNew();
-        var last = Grab(area);
+        var last = new uint[surface.Width * surface.Height];
+        Capture.GrabInto(surface, area);
+        surface.Pixels.CopyTo(last);
+        if (before != null)
+        {
+            while (Same(last, before, surface.Width, compare) && clock.ElapsedMilliseconds < 800)
+            {
+                await Task.Delay(40);
+                if (Escape()) return null;
+                Capture.GrabInto(surface, area);
+                surface.Pixels.CopyTo(last);
+            }
+        }
         while (clock.ElapsedMilliseconds < 1500)
         {
             await Task.Delay(60);
-            var next = Grab(area);
-            if (next.AsSpan().SequenceEqual(last)) return next;
-            last = next;
+            if (Escape()) return null;
+            Capture.GrabInto(surface, area);
+            if (Same(surface.Pixels, last, surface.Width, compare)) return last;
+            surface.Pixels.CopyTo(last);
         }
         return last;
     }
 
-    static uint[] Grab(Rectangle area)
+    /// Equal in the compared columns, allowing a few changed rows: a caret, a
+    /// spinner or a GIF would otherwise keep every step waiting its full time.
+    static bool Same(ReadOnlySpan<uint> a, ReadOnlySpan<uint> b, int width, int compare)
     {
-        using var frame = Capture.Grab(area);
-        return frame.Pixels.ToArray();
+        var height = a.Length / width;
+        var allowed = Math.Max(2, height / 50);
+        for (var y = 0; y < height; y++)
+            if (!a.Slice(y * width, compare).SequenceEqual(b.Slice(y * width, compare)) && --allowed < 0)
+                return false;
+        return true;
     }
 
-    static bool Escape() => (GetAsyncKeyState(0x1B) & 0x8000) != 0;
+    /// Checked rather than polled once per step: a quick tap would otherwise
+    /// fall between checks.
+    static bool Escape() => (GetAsyncKeyState(0x1B) & 0x8001) != 0;
 
-    static void Wheel(int notches)
+    /// False if Windows did not accept the input: UIPI blocks it for windows
+    /// running elevated, and the scroll then never happens.
+    static bool Wheel(int notches)
     {
         var input = new INPUT
         {
             Type = 0, // INPUT_MOUSE
             Mouse = new MOUSEINPUT { MouseData = notches * 120, Flags = 0x0800 }, // MOUSEEVENTF_WHEEL
         };
-        SendInput(1, [input], Marshal.SizeOf<INPUT>());
+        return SendInput(1, [input], Marshal.SizeOf<INPUT>()) == 1;
     }
+
+    const uint GA_ROOT = 2;
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [StructLayout(LayoutKind.Sequential)]
     struct MOUSEINPUT
