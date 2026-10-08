@@ -10,7 +10,7 @@ two-monitor desktop (5120x1440 + second display), approximate:
 | | |
 | --- | --- |
 | Idle CPU | 0 ms over 10 s |
-| Idle memory | ~12 MB private, ~3 MB working set |
+| Idle memory | ~11 MB private, under 10 MB working set |
 | Hotkey to overlay on screen | ~85-150 ms (screen read ~60 ms of that) |
 
 ## Use
