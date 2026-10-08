@@ -417,6 +417,38 @@ public class HistoryTests
     }
 }
 
+public class CornerTests
+{
+    [Fact]
+    public void Corners_are_clear_outside_the_curve_opaque_inside_and_partial_on_it()
+    {
+        const int w = 40, h = 30, r = 8;
+        var pixels = new uint[w * h];
+        pixels.AsSpan().Fill(0x00123456);
+        Capture.Corners(pixels, w, h, r);
+        uint Alpha(int x, int y) => pixels[y * w + x] >> 24;
+        // The very corner pixel of all four corners is outside the curve.
+        foreach (var (x, y) in new[] { (0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1) }) Assert.Equal(0u, Alpha(x, y));
+        // The middle and the straight edges are opaque.
+        Assert.Equal(255u, Alpha(w / 2, h / 2));
+        Assert.Equal(255u, Alpha(r, 0));
+        Assert.Equal(255u, Alpha(0, r));
+        // Somewhere on the curve is partly covered: antialiased, not stepped.
+        var partial = Enumerable.Range(0, r).Any(i => Alpha(i, r - 1 - i) is > 0 and < 255);
+        Assert.True(partial);
+        // Colour is untouched.
+        Assert.Equal(0x123456u, pixels[0] & 0xFFFFFF);
+    }
+
+    [Fact]
+    public void A_radius_larger_than_the_image_is_held_to_half_of_it()
+    {
+        var pixels = new uint[6 * 6];
+        Capture.Corners(pixels, 6, 6, 50);
+        Assert.Equal(255u, pixels[3 * 6 + 3] >> 24);
+    }
+}
+
 public class SettingsWindowTests
 {
     static Settings With(string region = "Control+Shift+Q", string screen = "", string scroll = "", string folder = @"C:\Shots") =>

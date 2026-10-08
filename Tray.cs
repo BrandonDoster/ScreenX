@@ -145,7 +145,7 @@ sealed class Tray : ApplicationContext
     /// Freeze the screen and let the user choose part of it. Null if they
     /// cancelled; otherwise the caller owns the frame. `area` is relative to
     /// the frame, and `screen` is where the frame was read from.
-    (Frame shot, Rectangle area, Rectangle screen)? Choose()
+    (Frame shot, Rectangle area, Rectangle screen, int radius)? Choose()
     {
         var clock = Stopwatch.StartNew();
         // Read once: everything below uses this, not a fresh reading that
@@ -161,7 +161,7 @@ sealed class Tray : ApplicationContext
             var timing = $"last: capture {grabbed} ms, overlay {overlay.ShownAfterMs} ms";
             SetTooltip(timing);
             Log(timing);
-            if (chosen is Rectangle area) return (shot, area, screen);
+            if (chosen is Rectangle area) return (shot, area, screen, overlay.ChosenRadius);
         }
         catch
         {
@@ -181,7 +181,7 @@ sealed class Tray : ApplicationContext
         {
             if (Choose() is not { } picked) return;
             using (picked.shot)
-                Deliver(picked.shot, picked.area, null);
+                Deliver(picked.shot, picked.area, null, picked.radius);
         }
         catch (Exception e)
         {
@@ -260,12 +260,14 @@ sealed class Tray : ApplicationContext
         if (File.Exists(path)) File.AppendAllText(path, $"{DateTime.Now:s} {line}\n");
     }
 
-    void Deliver(Frame shot, Rectangle rect, string? note)
+    /// `radius` rounds the corners, for a whole window on Windows 11: the
+    /// corners are made transparent instead of showing what was behind them.
+    void Deliver(Frame shot, Rectangle rect, string? note, int radius = 0)
     {
         var (copy, save, edit) = Actions(settings.AfterCapture);
+        using var image = radius > 0 ? Capture.Rounded(shot, rect, radius) : shot.ToBitmap(rect);
         if (edit)
         {
-            using var image = shot.ToBitmap(rect);
             new Editor(image, settings.Folder, null).Show();
             return;
         }
@@ -274,11 +276,12 @@ sealed class Tray : ApplicationContext
         {
             Directory.CreateDirectory(settings.Folder);
             path = UniquePath(settings.Folder, $"ScreenX_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}");
-            using var image = shot.ToBitmap(rect);
             image.Save(path, ImageFormat.Png);
             lastSaved = path;
         }
-        if (copy) shot.CopyToClipboard(rect, hotkeys.Handle);
+        // With rounded corners, the plain bitmap keeps what was behind them
+        // (for programs that ignore alpha) and a PNG carries the transparency.
+        if (copy) Clip.Copy(shot.Pixels, shot.Width, rect, hotkeys.Handle, radius > 0 ? Clip.Png(image) : null);
 
         var title = (copy, save) switch
         {

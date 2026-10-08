@@ -7,6 +7,9 @@ using System.Text;
 
 namespace ScreenX;
 
+/// A window the overlay can snap to: where it is, and how round its corners are.
+readonly record struct WindowArea(Rectangle Rect, int Radius);
+
 static class Capture
 {
     /// The screen inside `area`, in physical pixels.
@@ -51,9 +54,9 @@ static class Capture
     /// resize border Windows 10 and later put around it. `GetWindowRect`
     /// includes that border, so a snapped window would take a strip of
     /// whatever is behind it on three sides.
-    public static List<Rectangle> Windows(Rectangle area)
+    public static List<WindowArea> Windows(Rectangle area)
     {
-        var found = new List<Rectangle>();
+        var found = new List<WindowArea>();
         var name = new StringBuilder(64);
         EnumWindows((hwnd, _) =>
         {
@@ -70,13 +73,78 @@ static class Capture
             if (name.ToString() is "Progman" or "WorkerW") return true;
             if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, out RECT r, Marshal.SizeOf<RECT>()) != 0) return true;
 
-            var rect = Rectangle.Intersect(Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom), area);
+            var whole = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
+            var rect = Rectangle.Intersect(whole, area);
             if (rect.Width < 48 || rect.Height < 48) return true;
             rect.Offset(-area.X, -area.Y);
-            found.Add(rect);
+            // A window cut off by the edge of the screen has square corners
+            // where it is cut; only a whole one is rounded.
+            found.Add(new WindowArea(rect, rect.Size == whole.Size ? CornerRadius(hwnd) : 0));
             return true;
         }, IntPtr.Zero);
         return found;
+    }
+
+    /// How round Windows 11 draws this window's corners, in pixels: 8 at 100%
+    /// for an ordinary window, 4 for one that asked for small corners, none
+    /// for a maximised window, one that opted out, or one with no frame.
+    static int CornerRadius(IntPtr hwnd)
+    {
+        if (Environment.OSVersion.Version.Build < 22000 || IsZoomed(hwnd)) return 0;
+        DwmGetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, out int preference, 4);
+        const int DONOTROUND = 1, ROUNDSMALL = 3;
+        if (preference == DONOTROUND) return 0;
+        // With the default preference, Windows rounds framed windows only.
+        const int WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
+        var style = GetWindowLong(hwnd, GWL_STYLE);
+        if (preference == 0 && (style & (WS_CAPTION | WS_THICKFRAME)) == 0) return 0;
+        var scale = GetDpiForWindow(hwnd) / 96.0;
+        return (int)Math.Round((preference == ROUNDSMALL ? 4 : 8) * scale);
+    }
+
+    /// `rect` with transparent corners of `radius`, antialiased. The pixels
+    /// outside the curve are still in `frame` for the clipboard's plain copy.
+    public static Bitmap Rounded(Frame frame, Rectangle rect, int radius)
+    {
+        var bitmap = new Bitmap(rect.Width, rect.Height, PixelFormat.Format32bppArgb);
+        var data = bitmap.LockBits(new Rectangle(Point.Empty, rect.Size), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            unsafe
+            {
+                var to = new Span<uint>((void*)data.Scan0, rect.Width * rect.Height);
+                var from = frame.Pixels;
+                for (var y = 0; y < rect.Height; y++)
+                    from.Slice((rect.Y + y) * frame.Width + rect.X, rect.Width).CopyTo(to.Slice(y * rect.Width, rect.Width));
+                Corners(to, rect.Width, rect.Height, radius);
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+        return bitmap;
+    }
+
+    /// Alpha for an image `width` x `height` with corners of `radius`: opaque
+    /// inside, clear outside, the fraction of each edge pixel the curve covers.
+    internal static void Corners(Span<uint> pixels, int width, int height, int radius)
+    {
+        radius = Math.Min(radius, Math.Min(width, height) / 2);
+        for (var i = 0; i < pixels.Length; i++) pixels[i] |= 0xFF000000;
+        for (var y = 0; y < radius; y++)
+        for (var x = 0; x < radius; x++)
+        {
+            // Distance of the pixel centre from the centre of the curve.
+            double dx = radius - x - 0.5, dy = radius - y - 0.5;
+            var coverage = Math.Clamp(radius - Math.Sqrt(dx * dx + dy * dy) + 0.5, 0, 1);
+            var alpha = (uint)Math.Round(coverage * 255) << 24;
+            foreach (var (cx, cy) in new[] { (x, y), (width - 1 - x, y), (x, height - 1 - y), (width - 1 - x, height - 1 - y) })
+            {
+                ref var p = ref pixels[cy * width + cx];
+                p = (p & 0x00FFFFFF) | alpha;
+            }
+        }
     }
 
     /// Return the capture's memory to the system once it is finished with.
@@ -92,8 +160,11 @@ static class Capture
         SetProcessWorkingSetSize(-1, -1, -1);
     }
 
-    const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14;
-    const int GWL_EXSTYLE = -20, WS_EX_TRANSPARENT = 0x20;
+    const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14, DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    const int GWL_STYLE = -16, GWL_EXSTYLE = -20, WS_EX_TRANSPARENT = 0x20;
+
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
 
     [StructLayout(LayoutKind.Sequential)]
     struct RECT { public int Left, Top, Right, Bottom; }
@@ -176,19 +247,52 @@ static unsafe class Clip
 {
     const uint CF_DIB = 8, GMEM_MOVEABLE = 2;
 
+    /// An image with transparency (a window with rounded corners) also goes on
+    /// as PNG, which keeps it; the CF_DIB copy is laid over white, because
+    /// most readers of CF_DIB ignore alpha and would show the corners black.
     public static void Copy(Bitmap image, IntPtr owner)
     {
         var whole = new Rectangle(Point.Empty, image.Size);
-        var data = image.LockBits(whole, ImageLockMode.ReadOnly, PixelFormat.Format32bppRgb);
+        var data = image.LockBits(whole, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        uint[]? flattened = null;
         try
         {
             // 32 bpp, so the stride is the width and the rows are one run.
-            Copy(new Span<uint>((void*)data.Scan0, image.Width * image.Height), image.Width, whole, owner);
+            var pixels = new Span<uint>((void*)data.Scan0, image.Width * image.Height);
+            // Any pixel below 0xFF000000 in value has alpha under 255.
+            if (pixels.IndexOfAnyInRange(0u, 0xFEFFFFFFu) >= 0)
+                flattened = OverWhite(pixels);
+            else
+            {
+                Copy(pixels, image.Width, whole, owner);
+                return;
+            }
         }
         finally
         {
             image.UnlockBits(data);
         }
+        Copy(flattened, image.Width, whole, owner, Png(image));
+    }
+
+    static uint[] OverWhite(ReadOnlySpan<uint> pixels)
+    {
+        var flat = new uint[pixels.Length];
+        for (var i = 0; i < pixels.Length; i++)
+        {
+            var p = pixels[i];
+            var a = p >> 24;
+            uint Mix(int shift) => (((p >> shift) & 0xFF) * a + 255 * (255 - a)) / 255;
+            flat[i] = 0xFF000000 | Mix(16) << 16 | Mix(8) << 8 | Mix(0);
+        }
+        return flat;
+    }
+
+    public static byte[] Png(Bitmap image)
+    {
+        using var stream = new MemoryStream();
+        image.Save(stream, ImageFormat.Png);
+        return stream.ToArray();
     }
 
     /// Put `rect` of an image `width` pixels wide on the clipboard as CF_DIB;
@@ -198,7 +302,7 @@ static unsafe class Clip
     /// the whole image inside this process. Three full-screen copies took
     /// private memory from 11 MB to 97 MB. Handed over as an HGLOBAL, the
     /// copy belongs to the clipboard.
-    public static void Copy(Span<uint> pixels, int width, Rectangle rect, IntPtr owner)
+    public static void Copy(Span<uint> pixels, int width, Rectangle rect, IntPtr owner, byte[]? png = null)
     {
         var size = DibSize(rect);
         var memory = GlobalAlloc(GMEM_MOVEABLE, (nuint)size);
@@ -227,6 +331,20 @@ static unsafe class Clip
             {
                 GlobalFree(memory);
                 throw new InvalidOperationException("the clipboard refused the image");
+            }
+            // The "PNG" format is the one browsers, Office, Teams and Slack
+            // read when it is there; it is the only one that keeps alpha.
+            if (png != null)
+            {
+                var copy = GlobalAlloc(GMEM_MOVEABLE, (nuint)png.Length);
+                var q = (byte*)GlobalLock(copy);
+                if (q != null)
+                {
+                    png.CopyTo(new Span<byte>(q, png.Length));
+                    GlobalUnlock(copy);
+                    if (SetClipboardData(RegisterClipboardFormat("PNG"), copy) == IntPtr.Zero) GlobalFree(copy);
+                }
+                else if (copy != IntPtr.Zero) GlobalFree(copy);
             }
         }
         finally
@@ -263,6 +381,7 @@ static unsafe class Clip
     [DllImport("kernel32.dll")] public static extern IntPtr GlobalLock(IntPtr memory);
     [DllImport("kernel32.dll")] public static extern bool GlobalUnlock(IntPtr memory);
     [DllImport("kernel32.dll")] public static extern IntPtr GlobalFree(IntPtr memory);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterClipboardFormat(string name);
     [DllImport("user32.dll")] public static extern bool OpenClipboard(IntPtr owner);
     [DllImport("user32.dll")] public static extern bool EmptyClipboard();
     [DllImport("user32.dll")] public static extern IntPtr SetClipboardData(uint format, IntPtr memory);

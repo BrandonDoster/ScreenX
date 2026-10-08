@@ -21,7 +21,9 @@ sealed class Overlay : Form
     const int WM_DPICHANGED = 0x02E0;
 
     Frame? shot, dim;
-    List<Rectangle> windows = [];
+    List<WindowArea> windows = [];
+    /// Corner radius of the window the selection is snapped to; 0 for a drag.
+    int radius;
     Rectangle? selection, chosen;
     Rectangle screen;
     Point? pointer;
@@ -32,6 +34,9 @@ sealed class Overlay : Form
 
     /// From the hotkey to the overlay's first frame on screen.
     public long ShownAfterMs { get; private set; }
+
+    /// Corner radius of what was chosen, when it was a whole window.
+    public int ChosenRadius { get; private set; }
 
     public Overlay()
     {
@@ -52,7 +57,7 @@ sealed class Overlay : Form
     /// `screen` is the rectangle `shot` was read from. It is passed in rather
     /// than read again, because the layout can change in between (a monitor
     /// plugged in) and the overlay must match the pixels it is showing.
-    public Rectangle? Choose(Frame shot, List<Rectangle> windows, Stopwatch clock, Rectangle screen)
+    public Rectangle? Choose(Frame shot, List<WindowArea> windows, Stopwatch clock, Rectangle screen)
     {
         this.shot = shot;
         this.windows = windows;
@@ -64,7 +69,8 @@ sealed class Overlay : Form
         dragging = false;
         Bounds = screen;
         pointer = Cursor.Position - (Size)screen.Location;
-        selection = Under(pointer.Value);
+        (selection, radius) = Under(pointer.Value);
+        ChosenRadius = 0;
         try
         {
             ShowDialog();
@@ -80,17 +86,18 @@ sealed class Overlay : Form
     }
 
     /// The window under `point`, front-most first, or the monitor under it.
-    Rectangle? Under(Point point)
+    (Rectangle, int radius) Under(Point point)
     {
         foreach (var window in windows)
-            if (window.Contains(point)) return window;
+            if (window.Rect.Contains(point)) return (window.Rect, window.Radius);
         var monitor = Screen.FromPoint(point + (Size)screen.Location).Bounds;
         monitor.Offset(-screen.X, -screen.Y);
-        return monitor;
+        return (monitor, 0);
     }
 
-    void Select(Rectangle? next)
+    void Select(Rectangle? next, int corners = 0)
     {
+        radius = corners;
         if (next == selection) return;
         if (selection is Rectangle old) Invalidate(Around(old));
         if (next is Rectangle now) Invalidate(Around(now));
@@ -110,12 +117,15 @@ sealed class Overlay : Form
     void Finish(Rectangle? result)
     {
         // Never more than the capture holds.
+        var whole = result;
         if (result is Rectangle r && shot != null)
         {
             r.Intersect(new Rectangle(0, 0, shot.Width, shot.Height));
             result = r.Width > 0 && r.Height > 0 ? r : null;
         }
         chosen = result;
+        // Rounded only when it is still exactly the window that was snapped to.
+        ChosenRadius = !dragging && result == whole && result == selection ? radius : 0;
         // Ends ShowDialog. A modal form is hidden by this, not disposed.
         DialogResult = DialogResult.OK;
     }
@@ -164,7 +174,8 @@ sealed class Overlay : Form
         MovePointer(e.Location);
         if (pressed is not Point from)
         {
-            Select(Under(e.Location));
+            var (under, corners) = Under(e.Location);
+            Select(under, corners);
             return;
         }
         if (!dragging && Math.Abs(e.X - from.X) < DragThreshold && Math.Abs(e.Y - from.Y) < DragThreshold) return;
