@@ -66,6 +66,16 @@ sealed class Tray : ApplicationContext
         // pay for it.
         _ = overlay.Handle;
         Reload();
+        // Start-up touches far more than idle ever needs: about 50 MB of
+        // working set until the first capture trimmed it. Trimmed once, as
+        // soon as the message loop has nothing to do.
+        Application.Idle += TrimOnce;
+    }
+
+    static void TrimOnce(object? sender, EventArgs e)
+    {
+        Application.Idle -= TrimOnce;
+        Capture.GiveMemoryBack();
     }
 
     /// From the tray menu: wait for the menu to finish closing, or it is in
