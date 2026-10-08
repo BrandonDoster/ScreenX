@@ -21,6 +21,9 @@ static class Program
     static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        // Follow the Windows light or dark setting, so the editor and the tray
+        // menu match everything else on the desktop.
+        Application.SetColorMode(SystemColorMode.System);
         // An editor on its own, for "Open with". Not the resident copy, so it
         // ends when the window closes.
         if (args is ["--edit", var file])
