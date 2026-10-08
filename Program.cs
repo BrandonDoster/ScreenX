@@ -70,6 +70,10 @@ static class Program
         {
             if (!first)
             {
+                // This copy was just started by the user, so it may hand the
+                // foreground on; without that the resident copy's window
+                // opens behind everything, which looks like nothing happened.
+                AllowSetForegroundWindow(-1);
                 reopen?.Set();
                 return 0;
             }
@@ -77,6 +81,8 @@ static class Program
         }
         return 0;
     }
+
+    [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int process);
 }
 
 /// Opening image files from disk, which "Open with" makes reachable from any

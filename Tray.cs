@@ -91,13 +91,19 @@ sealed class Tray : ApplicationContext
     /// it closes, which also picks up an edit made to the file by hand.
     void OpenSettings()
     {
+        // Not over a capture in progress: it would be in the frames, and take
+        // the focus a scrolling capture's wheel may depend on.
+        if (busy)
+        {
+            Later(OpenSettings, 500);
+            return;
+        }
         if (settingsWindow != null)
         {
             settingsWindow.Activate();
             return;
         }
         var (current, _) = Settings.Load();
-        foreach (var id in new[] { RegionId, ScreenId, ScrollId }) hotkeys.Register(id, "");
         var startup = StartsWithWindows();
         settingsWindow = new SettingsWindow(current, startup);
         settingsWindow.FormClosed += (_, _) =>
@@ -105,7 +111,11 @@ sealed class Tray : ApplicationContext
             if (settingsWindow.Saved && settingsWindow.StartWithWindows != startup) SetStartup(settingsWindow.StartWithWindows);
             settingsWindow = null;
             Reload();
+            Capture.GiveMemoryBack();
         };
+        // Off only once the window exists, so a failure building it cannot
+        // leave the hotkeys off.
+        foreach (var id in new[] { RegionId, ScreenId, ScrollId }) hotkeys.Register(id, "");
         settingsWindow.Show();
         settingsWindow.Activate();
     }
@@ -237,6 +247,10 @@ sealed class Tray : ApplicationContext
                 Deliver(outcome.Image, new Rectangle(0, 0, outcome.Image.Width, outcome.Image.Height),
                     $"{outcome.Image.Height} px tall, stopped because {outcome.Ended}");
         }
+        catch (OperationCanceledException)
+        {
+            // Esc before the first frame: nothing to say.
+        }
         catch (Exception e)
         {
             Fail(e);
@@ -266,10 +280,14 @@ sealed class Tray : ApplicationContext
     void Deliver(Frame shot, Rectangle rect, string? note, int radius = 0)
     {
         var (copy, save, edit) = Actions(settings.AfterCapture);
-        using var image = radius > 0 ? Capture.Rounded(shot, rect, radius) : shot.ToBitmap(rect);
+        // Only when something needs it: a copy-only capture goes straight from
+        // the frame, and a 50 Mpx scrolling capture would otherwise hold
+        // another 200 MB for nothing.
+        using var image = radius > 0 ? Capture.Rounded(shot, rect, radius)
+            : edit || save ? shot.ToBitmap(rect) : null;
         if (edit)
         {
-            new Editor(image, settings.Folder, null).Show();
+            new Editor(image!, settings.Folder, null).Show();
             return;
         }
         string? path = null;
@@ -277,12 +295,12 @@ sealed class Tray : ApplicationContext
         {
             Directory.CreateDirectory(settings.Folder);
             path = UniquePath(settings.Folder, $"ScreenX_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}");
-            image.Save(path, ImageFormat.Png);
+            image!.Save(path, ImageFormat.Png);
             lastSaved = path;
         }
         // With rounded corners, the plain bitmap keeps what was behind them
         // (for programs that ignore alpha) and a PNG carries the transparency.
-        if (copy) Clip.Copy(shot.Pixels, shot.Width, rect, hotkeys.Handle, radius > 0 ? Clip.Png(image) : null);
+        if (copy) Clip.Copy(shot.Pixels, shot.Width, rect, hotkeys.Handle, radius > 0 ? Clip.Png(image!) : null);
 
         var title = (copy, save) switch
         {

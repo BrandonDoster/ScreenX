@@ -18,6 +18,13 @@ public class HotkeyTests
     [InlineData("F13")]
     [InlineData("Win+D1")]
     [InlineData("Alt+PrintScreen")]
+    // What the settings window's recorder writes: Keys names as ToString gives them.
+    [InlineData("Control+D1")]
+    [InlineData("Control+Oemplus")]
+    [InlineData("Control+Next")]
+    [InlineData("Win+Shift+S")]
+    [InlineData("Shift+Return")]
+    [InlineData("Control+A")]
     public void Accepted(string text) => Assert.True(HotkeyWindow.TryParse(text, out _, out _));
 
     [Theory]

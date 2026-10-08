@@ -116,7 +116,10 @@ sealed class Stitcher
             return Result.Added;
         }
         if (rows.Whole.AsSpan().SequenceEqual(last.Whole)) return Result.End;
-        expected = lastShift > 0 ? lastShift : guess;
+        // The driver's estimate follows the step size, which it changes every
+        // step; the last offset alone was a whole period out on repeating
+        // content once the step grew.
+        expected = guess > 0 ? guess : lastShift;
 
         // Header and footer, strip by strip, so a bar across part of the width
         // counts: a notification in a corner, a horizontal scrollbar track. As
@@ -160,6 +163,14 @@ sealed class Stitcher
         if (shift < 0) shift = Vote(lastWhole, whole, Band, track: false);
         if (shift == 0) return Result.End;
         if (shift < 0) return Result.Lost;
+
+        // Whether each strip changed at all, by looking rather than by whether
+        // its own match succeeded: a strip that is blank in the first pair and
+        // gets long lines later has no match of its own, and was then treated
+        // as a sidebar and painted over.
+        for (var s = 0; s < strips; s++)
+            if (!rows.Hashes.AsSpan(s * Height + top, Band).SequenceEqual(last.Hashes.AsSpan(s * Height + top, Band)))
+                movedSteps[s]++;
 
         // The new rows are the bottom `shift` rows of this frame's band, just
         // above the footer.
@@ -253,14 +264,16 @@ sealed class Stitcher
             var (shift, score, compared, ambiguous) = ExactShift(a, b, s, band);
             if (compared == 0) continue;
             if (score < MinAgreement) { pending.Add(s); continue; }
-            if (shift == 0) stillWeight += compared;
+            // A known sidebar is still by definition and says nothing about
+            // whether the page moved: counted, a wide one turned every failed
+            // match into "the end".
+            if (shift == 0) stillWeight += track && Sidebar(s) ? 0 : compared;
             // A strip that fits several offsets (the same words on every line
             // of a document) cannot tell them apart and must not outvote one
             // that can (the line numbers). Notepad locked onto one line height
             // that way while the real scroll was six times larger.
             else if (ambiguous) guesses[shift] = guesses.GetValueOrDefault(shift) + compared;
             else votes[shift] = votes.GetValueOrDefault(shift) + compared;
-            if (track && shift > 0 && movedSteps.Length > s) movedSteps[s]++;
         }
         // Nothing distinctive anywhere: an empty grid. Guess, which is what
         // the ambiguous strips did, each choosing nearest the expected offset.
@@ -273,12 +286,8 @@ sealed class Stitcher
             {
                 var (shift, compared) = NearShift(a, b, s, band);
                 if (shift < 0) unmatched += compared;
-                else if (shift == 0) stillWeight += compared;
-                else
-                {
-                    votes[shift] = votes.GetValueOrDefault(shift) + compared;
-                    if (track && movedSteps.Length > s) movedSteps[s]++;
-                }
+                else if (shift == 0) stillWeight += track && Sidebar(s) ? 0 : compared;
+                else votes[shift] = votes.GetValueOrDefault(shift) + compared;
             }
         }
         if (votes.Count == 0)
@@ -497,12 +506,16 @@ sealed class Stitcher
         if (added.Count == 0) return;
         var final = added[^1];
         var model = final.AsSpan(final.Length - Width, used).ToArray();
-        var judged = Math.Max(1, strips - SideStrips);
-        // Sidebars are left out too: Compose repaints them anyway.
+        // Sidebars are left out too: Compose repaints them anyway. But some
+        // strip must be judged, or every row reads as blank: a narrow area
+        // with an icon column cut a capture from 1173 rows to 324.
+        var judged = Enumerable.Range(0, Math.Max(1, strips - SideStrips)).Where(s => !Sidebar(s)).ToArray();
+        if (judged.Length == 0) judged = Enumerable.Range(0, strips).Where(s => !Sidebar(s)).ToArray();
+        if (judged.Length == 0) return;
         bool Blank(ReadOnlySpan<uint> row)
         {
-            for (var s = 0; s < judged; s++)
-                if (!Sidebar(s) && !row.Slice(s * stripWidth, stripWidth).SequenceEqual(model.AsSpan(s * stripWidth, stripWidth)))
+            foreach (var s in judged)
+                if (!row.Slice(s * stripWidth, stripWidth).SequenceEqual(model.AsSpan(s * stripWidth, stripWidth)))
                     return false;
             return true;
         }

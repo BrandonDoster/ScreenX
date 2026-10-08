@@ -451,6 +451,85 @@ public class StitcherTests
         Assert.Equal(before, stitcher.TotalHeight);
     }
 
+    /// The right side of a document is blank in the first frames and has
+    /// long lines further down, including in the very last step. A blank
+    /// strip looked still and was painted over as a sidebar.
+    [Fact]
+    public void A_strip_blank_at_first_that_gets_content_later_is_kept()
+    {
+        var page = Page(1300, seed: 21);
+        for (var y = 0; y < 1300; y++)
+            if (y < 700 || (y > 760 && y < 1150)) page.AsSpan(y * Width + Width / 2, Width / 2).Fill(0xFFFFFFFF);
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        var offsets = new[] { 0, 97, 194, 291, 388, 485, 582, 679, 776, 873, 970 };
+        foreach (var o in offsets) Assert.Equal(Stitcher.Result.Added, stitcher.Add(Plain(page, o)));
+        var image = stitcher.Compose();
+        Assert.True(SamePage(image, page, 0, 970 + View), "content in a once-blank strip was lost");
+    }
+
+    /// A narrow area, three strips, with a still icon column on the left.
+    /// Every judged strip being a sidebar made every row read as blank.
+    [Fact]
+    public void Trimming_a_narrow_area_with_a_sidebar_keeps_the_content()
+    {
+        const int width = 150;
+        var page = new Random(22);
+        var rows = new uint[1200 * width];
+        for (var i = 0; i < rows.Length; i++) rows[i] = (uint)page.Next() | 0xFF000000;
+        var icons = Page(View, seed: 23);
+        uint[] At(int offset)
+        {
+            var f = new uint[View * width];
+            for (var y = 0; y < View; y++)
+            for (var x = 0; x < width; x++)
+                f[y * width + x] = x < 48 ? icons[y * Width + x] : rows[(offset + y) * width + x];
+            return f;
+        }
+        var stitcher = new Stitcher(width, View, ignoreRight: 0);
+        foreach (var o in new[] { 0, 100, 200, 300, 400 }) Assert.Equal(Stitcher.Result.Added, stitcher.Add(At(o)));
+        var before = stitcher.TotalHeight;
+        stitcher.TrimBlankTail(keep: 24);
+        Assert.Equal(before, stitcher.TotalHeight);
+    }
+
+    /// A wide still pane beside text that could not be matched is lost, not
+    /// the end: a sidebar is still by nature and says nothing about the page.
+    [Fact]
+    public void A_still_pane_does_not_turn_a_failed_match_into_the_end()
+    {
+        var pane = Page(View, seed: 24);
+        uint[] With(uint[] text, int offset)
+        {
+            var f = new uint[View * Width];
+            for (var y = 0; y < View; y++)
+            for (var x = 0; x < Width; x++)
+                f[y * Width + x] = x < Width * 2 / 3 ? pane[y * Width + x] : text[(offset + y) * Width + x];
+            return f;
+        }
+        var text = Page(1200, seed: 25);
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        stitcher.Add(With(text, 0));
+        Assert.Equal(Stitcher.Result.Added, stitcher.Add(With(text, 100)));
+        // Then something unrelated where the text was.
+        Assert.Equal(Stitcher.Result.Lost, stitcher.Add(With(Page(1200, seed: 26), 300)));
+    }
+
+    /// Repeating content once the step size changes: the driver's estimate
+    /// for this step decides, not the offset of the last one.
+    [Fact]
+    public void Repeating_content_follows_the_estimate_as_the_step_grows()
+    {
+        var tile = Page(20, seed: 27);
+        var page = new uint[1500 * Width];
+        for (var y = 0; y < 1500; y++) Array.Copy(tile, (y % 20) * Width, page, y * Width, Width);
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        stitcher.Add(Plain(page, 0));
+        Assert.Equal(Stitcher.Result.Added, stitcher.Add(Plain(page, 30), guess: 30));
+        Assert.Equal(30, stitcher.LastShift);
+        Assert.Equal(Stitcher.Result.Added, stitcher.Add(Plain(page, 80), guess: 50));
+        Assert.Equal(50, stitcher.LastShift);
+    }
+
     [Fact]
     public void A_frame_of_the_wrong_size_is_refused()
     {

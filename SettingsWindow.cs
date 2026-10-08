@@ -246,15 +246,30 @@ sealed class SettingsWindow : Form
 
         // Alt and F10 combinations are system keys; take them before the
         // form uses them for its menu or mnemonics.
+        // Control combinations too: the text box would take Control+A as
+        // select-all before it could be recorded.
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             const int WM_SYSKEYDOWN = 0x0104;
-            if (msg.Msg == WM_SYSKEYDOWN)
+            if (msg.Msg == WM_SYSKEYDOWN || (keyData & Keys.Control) != 0)
             {
                 OnKeyDown(new KeyEventArgs(keyData));
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        // Enter and Esc with a modifier are hotkeys to record; on their own
+        // they still press Save and Cancel.
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            var key = keyData & Keys.KeyCode;
+            if (key is Keys.Enter or Keys.Escape && (keyData & Keys.Modifiers) != 0)
+            {
+                OnKeyDown(new KeyEventArgs(keyData));
+                return true;
+            }
+            return base.ProcessDialogKey(keyData);
         }
 
         void Record(Keys key, bool control, bool alt, bool shift)

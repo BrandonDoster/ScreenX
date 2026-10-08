@@ -52,9 +52,10 @@ static class Scrolling
             var ignoreRight = Math.Max(24, area.Width / 20);
             var stitcher = new Stitcher(area.Width, area.Height, ignoreRight);
             var compare = area.Width - Math.Min(ignoreRight, area.Width / 2);
-            var current = await Settled(area, surface, null, compare);
-            if (current == null) return null;
+            // Esc this early is a change of mind, not a too-small area.
+            var current = await Settled(area, surface, null, compare) ?? throw new OperationCanceledException();
             stitcher.Add(current);
+            var shiftNotches = 0;
 
             var notches = 2;
             var retries = 0;
@@ -70,6 +71,9 @@ static class Scrolling
             {
                 if (Escape()) { ended = "stopped"; break; }
                 if (clock.Elapsed > MaxTime) { ended = "it reached the time limit"; break; }
+                // Moving the pointer while the user holds a button would drag
+                // whatever they are holding to the area and back, so wait.
+                while (ButtonDown() && clock.Elapsed < MaxTime && !Escape()) await Task.Delay(50);
                 if (!Wheel(-notches, aim))
                 {
                     ended = "Windows refused the scroll (the window may be running as administrator)";
@@ -80,7 +84,11 @@ static class Scrolling
                 if (frame == null) { ended = "stopped"; break; }
                 // Matching a tall area can take a noticeable fraction of a
                 // second, and the stitcher is pure, so it runs off the UI thread.
-                var guess = notches * perNotch;
+                // Scaled from the last offset seen once there is one, since the
+                // step size changes as it goes.
+                var guess = stitcher.LastShift > 0 && shiftNotches > 0
+                    ? stitcher.LastShift * notches / shiftNotches
+                    : notches * perNotch;
                 var result = await Task.Run(() => stitcher.Add(frame, guess));
                 log($"scroll step {steps}: {notches} notches, {result}, shift {stitcher.LastShift}, {step.ElapsedMilliseconds} ms");
                 if (result == Stitcher.Result.End) { ended = "it reached the end"; break; }
@@ -95,6 +103,7 @@ static class Scrolling
                     continue;
                 }
                 current = frame;
+                shiftNotches = notches;
                 retries = 0;
                 // Aim for a third to four fifths of what can still be matched:
                 // enough overlap to be sure, not so little it takes forever.
@@ -169,6 +178,9 @@ static class Scrolling
     /// Checked rather than polled once per step: a quick tap would otherwise
     /// fall between checks.
     static bool Escape() => (GetAsyncKeyState(0x1B) & 0x8001) != 0;
+
+    static bool ButtonDown() =>
+        (GetAsyncKeyState(0x01) & 0x8000) != 0 || (GetAsyncKeyState(0x02) & 0x8000) != 0 || (GetAsyncKeyState(0x04) & 0x8000) != 0;
 
     /// Scroll the window at `aim`, wherever the user has put the mouse since.
     ///

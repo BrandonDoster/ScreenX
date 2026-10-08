@@ -79,7 +79,7 @@ static class Capture
             rect.Offset(-area.X, -area.Y);
             // A window cut off by the edge of the screen has square corners
             // where it is cut; only a whole one is rounded.
-            found.Add(new WindowArea(rect, rect.Size == whole.Size ? CornerRadius(hwnd) : 0));
+            found.Add(new WindowArea(rect, rect.Size == whole.Size ? CornerRadius(hwnd, whole) : 0));
             return true;
         }, IntPtr.Zero);
         return found;
@@ -88,18 +88,22 @@ static class Capture
     /// How round Windows 11 draws this window's corners, in pixels: 8 at 100%
     /// for an ordinary window, 4 for one that asked for small corners, none
     /// for a maximised window, one that opted out, or one with no frame.
-    static int CornerRadius(IntPtr hwnd)
+    ///
+    /// The window's own corner preference cannot be read back (DWM only takes
+    /// it), so this is Windows' default rule: framed windows are rounded,
+    /// except maximised or snapped to the side of the screen, and nothing is
+    /// rounded in a remote session. A window that opted out of rounding still
+    /// gets corners; see REVIEW-NOTES.md.
+    static int CornerRadius(IntPtr hwnd, Rectangle bounds)
     {
-        if (Environment.OSVersion.Version.Build < 22000 || IsZoomed(hwnd)) return 0;
-        DwmGetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, out int preference, 4);
-        const int DONOTROUND = 1, ROUNDSMALL = 3;
-        if (preference == DONOTROUND) return 0;
-        // With the default preference, Windows rounds framed windows only.
+        if (Environment.OSVersion.Version.Build < 22000 || IsZoomed(hwnd) || SystemInformation.TerminalServerSession) return 0;
         const int WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
-        var style = GetWindowLong(hwnd, GWL_STYLE);
-        if (preference == 0 && (style & (WS_CAPTION | WS_THICKFRAME)) == 0) return 0;
-        var scale = GetDpiForWindow(hwnd) / 96.0;
-        return (int)Math.Round((preference == ROUNDSMALL ? 4 : 8) * scale);
+        if ((GetWindowLong(hwnd, GWL_STYLE) & (WS_CAPTION | WS_THICKFRAME)) == 0) return 0;
+        // Snapped: it fills the work area top to bottom, or side to side.
+        var work = Screen.FromRectangle(bounds).WorkingArea;
+        if ((bounds.Top <= work.Top && bounds.Bottom >= work.Bottom) || (bounds.Left <= work.Left && bounds.Right >= work.Right))
+            return 0;
+        return (int)Math.Round(8 * GetDpiForWindow(hwnd) / 96.0);
     }
 
     /// `rect` with transparent corners of `radius`, antialiased. The pixels
@@ -160,7 +164,7 @@ static class Capture
         SetProcessWorkingSetSize(-1, -1, -1);
     }
 
-    const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14, DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14;
     const int GWL_STYLE = -16, GWL_EXSTYLE = -20, WS_EX_TRANSPARENT = 0x20;
 
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
