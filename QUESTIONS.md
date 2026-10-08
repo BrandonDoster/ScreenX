@@ -11,54 +11,65 @@ just tell me; nothing here blocks using the build.
    The other choices are `copy`, `save` and `editor` (open the editor
    straight away, nothing saved until you save). Is `both` right for you, or
    do you want the editor to open every time?
+1A. editor, with a copy to cliipboard only option being available in editor
 
 2. **Editor Save.** Ctrl+S writes `<name> (edited).png` beside the capture so
    the original is never overwritten. Would you rather it overwrite the
    capture it was opened from (one file per screenshot), or get a Save As
    dialog? The dialog loads shell extensions into the process and they stay
    loaded, which costs idle memory, so I left it out.
+2A. should same as name if editor is opened before save, if editing something already saved then it should prompt to overwrite ot save alongside.
 
 3. **Default hotkeys.** `Control+Alt+A` region, `Control+Alt+F` screen,
    `Control+Alt+S` scrolling — the old build's two plus one. Do you want
    PrintScreen for region? It needs Windows' own PrintScreen-opens-Snipping-
    Tool setting turned off, which ScreenX cannot do for you.
+3A. screen and scrolling doesn't have a default hotkey, region should be ctrl+shift+q
 
 4. **Scrolling capture start position.** It starts from wherever the page is
    scrolled to, like ShareX's default. Should it scroll to the top first?
    That needs Home or Ctrl+Home sent to the window, which does not work in
    every app.
+4A. Starts where the page is when the capture is started
 
 5. **Scrolling capture stop on mouse move.** Moving the mouse stops it,
    because the wheel goes to whatever is under the pointer and moving would
    scroll something else. One ShareX complaint is exactly this. Keep it?
+5A. I wouldn't stop on mouse moving. Just when it stops scrolling, when esc is hit or timeout
 
-6a. **Scrolling capture of repeating content.** On the first step, a page
+6. **Scrolling capture of repeating content.** On the first step, a page
    whose rows repeat exactly (an empty grid, a list of identical lines) fits
    several offsets and ScreenX stops rather than guess, because a guess
    silently duplicates or drops rows. After the first step it uses the scroll
    amount it has seen. Acceptable, or would you rather it guess?
+6A. guessing, better to have a slightly messed up capture that can be edited in the editor than no capture at all.
 
-6b. **Window snapping and rounded corners.** Clicking a window takes its
+7. **Window snapping and rounded corners.** Clicking a window takes its
    visible frame, so Windows 11's rounded corners show a sliver of whatever
    is behind. ShareX can make those corners transparent. Worth doing?
+7A.yes
 
 ## Shipping
 
-6. **Push and release.** Everything is committed on the local `windows`
+8. **Push and release.** Everything is committed on the local `windows`
    branch only; nothing is pushed. Want it pushed to GitHub? And a release
    workflow (zip of the published build on a `v*` tag, like the old one)?
+8A. not yet
 
-7. **Runtime.** The build needs the .NET 10 Desktop Runtime installed. The
+9. **Runtime.** The build needs the .NET 10 Desktop Runtime installed. The
    alternative is a self-contained build that carries its own runtime (much
    larger download, no install needed). You said size does not matter; idle
    memory is about the same either way. Which?
+9A. it shouldn't carry it but isn't there a way during an install or maybe when launched to prompt the user to install it through native windows tooling? I remember seeing "native" windows prompts to install .net when an app needed it beore.
 
-8. **Settings window.** Settings are still a JSON file opened from the tray,
+10. **Settings window.** Settings are still a JSON file opened from the tray,
    with Reload. Worth a small native settings dialog (hotkey capture,
    folder picker, after-capture choice)?
+10A. yeah settings GUI is worth since we are handling the window system in a better way.
 
 ## Housekeeping
 
-9. The old checkout (`ScreenX`, branch `master`) has untracked `node_modules/`
+11. The old checkout (`ScreenX`, branch `master`) has untracked `node_modules/`
    and `src-tauri/` folders left over from the webview build. I did not touch
    them. Recycle them?
+11A. yeah recycle is fine.

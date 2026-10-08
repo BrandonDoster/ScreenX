@@ -35,7 +35,9 @@ static class Scrolling
 
         var restore = Cursor.Position;
         // Over the area, so the wheel reaches it, but near the right edge,
-        // away from content that reacts to hover.
+        // away from content that reacts to hover. The pointer is parked there
+        // to keep hover effects out of the frames; the user can take it back
+        // at any time and the scrolling carries on (see `Wheel`).
         var aim = new Point(area.Right - Math.Min(40, area.Width / 4), area.Y + area.Height / 2);
         Cursor.Position = aim;
         // With "scroll inactive windows" turned off, the wheel goes to the
@@ -59,13 +61,16 @@ static class Scrolling
             var ended = "it reached the step limit";
             var steps = 0;
             var clock = Stopwatch.StartNew();
+            // How far a notch probably scrolls, for the stitcher to choose
+            // between offsets that fit equally well. Three lines of about 20
+            // px at 100% is the Windows default; it is only a tie-breaker.
+            var lines = SystemInformation.MouseWheelScrollLines;
+            var perNotch = lines > 0 ? lines * 20 * border.DeviceDpi / 96 : area.Height * 4 / 5;
             for (; steps < MaxSteps; steps++)
             {
                 if (Escape()) { ended = "stopped"; break; }
-                // The user moving the mouse means they want it back.
-                if (Cursor.Position != aim) { ended = "the mouse moved"; break; }
                 if (clock.Elapsed > MaxTime) { ended = "it reached the time limit"; break; }
-                if (!Wheel(-notches))
+                if (!Wheel(-notches, aim))
                 {
                     ended = "Windows refused the scroll (the window may be running as administrator)";
                     break;
@@ -75,7 +80,8 @@ static class Scrolling
                 if (frame == null) { ended = "stopped"; break; }
                 // Matching a tall area can take a noticeable fraction of a
                 // second, and the stitcher is pure, so it runs off the UI thread.
-                var result = await Task.Run(() => stitcher.Add(frame));
+                var guess = notches * perNotch;
+                var result = await Task.Run(() => stitcher.Add(frame, guess));
                 log($"scroll step {steps}: {notches} notches, {result}, shift {stitcher.LastShift}, {step.ElapsedMilliseconds} ms");
                 if (result == Stitcher.Result.End) { ended = "it reached the end"; break; }
                 if (result == Stitcher.Result.Lost)
@@ -83,7 +89,7 @@ static class Scrolling
                     // Usually a step too big to overlap. Scroll back, halve it,
                     // and try again from the frame that is still the last good one.
                     if (notches == 1 || retries++ == 2) { ended = "it lost its place; try a smaller area"; break; }
-                    Wheel(notches);
+                    Wheel(notches, aim);
                     notches = Math.Max(1, notches / 2);
                     if (await Settled(area, surface, frame, compare) == null) { ended = "stopped"; break; }
                     continue;
@@ -99,6 +105,7 @@ static class Scrolling
             }
 
             log($"scrolling capture ended after {steps} steps: {ended}");
+            stitcher.TrimBlankTail(keep: 24 * border.DeviceDpi / 96);
             var image = new Frame(area.Width, stitcher.TotalHeight);
             stitcher.Compose(image.Pixels);
             return new Outcome(image, steps, ended);
@@ -163,16 +170,33 @@ static class Scrolling
     /// fall between checks.
     static bool Escape() => (GetAsyncKeyState(0x1B) & 0x8001) != 0;
 
+    /// Scroll the window at `aim`, wherever the user has put the mouse since.
+    ///
+    /// The wheel goes to the window under the pointer, so the capture used to
+    /// stop as soon as the mouse moved. Now the pointer is moved to `aim`,
+    /// wheeled, and moved back, as one SendInput call: Windows inserts the
+    /// three events together, so nothing the user does lands between them and
+    /// the wheel is always routed by the `aim` position.
+    ///
     /// False if Windows did not accept the input: UIPI blocks it for windows
     /// running elevated, and the scroll then never happens.
-    static bool Wheel(int notches)
+    static bool Wheel(int notches, Point aim)
     {
-        var input = new INPUT
+        const uint MOVE = 0x0001, WHEEL = 0x0800, VIRTUALDESK = 0x4000, ABSOLUTE = 0x8000;
+        var screen = SystemInformation.VirtualScreen;
+        MOUSEINPUT To(Point p) => new()
         {
-            Type = 0, // INPUT_MOUSE
-            Mouse = new MOUSEINPUT { MouseData = notches * 120, Flags = 0x0800 }, // MOUSEEVENTF_WHEEL
+            // Absolute coordinates are 0-65535 across the whole virtual desktop.
+            Dx = (int)Math.Round((p.X - screen.Left) * 65535.0 / Math.Max(1, screen.Width - 1)),
+            Dy = (int)Math.Round((p.Y - screen.Top) * 65535.0 / Math.Max(1, screen.Height - 1)),
+            Flags = MOVE | ABSOLUTE | VIRTUALDESK,
         };
-        return SendInput(1, [input], Marshal.SizeOf<INPUT>()) == 1;
+        var wheel = new MOUSEINPUT { MouseData = notches * 120, Flags = WHEEL };
+        var now = Cursor.Position;
+        INPUT[] inputs = now == aim
+            ? [new INPUT { Mouse = wheel }]
+            : [new INPUT { Mouse = To(aim) }, new INPUT { Mouse = wheel }, new INPUT { Mouse = To(now) }];
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>()) == inputs.Length;
     }
 
     const uint GA_ROOT = 2;

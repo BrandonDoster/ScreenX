@@ -138,7 +138,7 @@ public class StitcherTests
                 var tall = random.Next(6, 12);
                 for (var y = line * 18 + 14 - tall; y < line * 18 + 14 && y < rows; y++)
                 for (var gx = x; gx < x + glyph; gx++)
-                    page[y * Width + gx] = 30;
+                    page[y * Width + gx] = 30 + (gx * 7 + y * 13) % 50; // rows of a glyph differ, as antialiased text does
                 x += glyph + random.Next(2, 10);
             }
         }
@@ -173,7 +173,8 @@ public class StitcherTests
         while (offset + 117.4 < 1400 - View - 2)
         {
             offset += 117.4;
-            Assert.Equal(Stitcher.Result.Added, stitcher.Add(Blended(page, offset)));
+            var result = stitcher.Add(Blended(page, offset));
+            Assert.True(result == Stitcher.Result.Added, $"{result} at offset {offset}");
             Assert.InRange(stitcher.LastShift, 116, 119);
         }
         // Rounding each step costs at most a row, so the page comes back within
@@ -196,19 +197,108 @@ public class StitcherTests
     static bool SamePage(uint[] image, uint[] page, int fromRow, int rows) =>
         image.AsSpan(fromRow * Width, rows * Width).SequenceEqual(page.AsSpan(0, rows * Width));
 
-    [Fact]
-    public void Periodic_rows_are_refused_rather_than_joined_at_the_wrong_period()
+    /// Twenty rows repeating: a grid. Scrolled by 30, every offset of 10 plus
+    /// a multiple of 20 fits. (By 40 the two frames would be identical, and
+    /// "the end" would be right.) It guesses rather than giving up, and the
+    /// driver's estimate of the scroll decides the guess.
+    [Theory]
+    [InlineData(30, 30)]
+    [InlineData(50, 50)]
+    [InlineData(0, 10)]
+    public void Periodic_rows_are_guessed_using_the_expected_scroll(int guess, int chosen)
     {
-        // Twenty rows repeating: a grid. Scrolled by 30, every offset of 10
-        // plus a multiple of 20 fits, and nothing yet says which. (By 40 the
-        // two frames would be identical, and "the end" would be right.)
         var tile = Page(20, seed: 7);
         var page = new uint[1200 * Width];
         for (var y = 0; y < 1200; y++) Array.Copy(tile, (y % 20) * Width, page, y * Width, Width);
         var stitcher = new Stitcher(Width, View, ignoreRight: 0);
         stitcher.Add(Plain(page, 0));
-        var result = stitcher.Add(Plain(page, 30));
-        Assert.True(result == Stitcher.Result.Lost || stitcher.LastShift == 30, $"{result}, shift {stitcher.LastShift}");
+        Assert.Equal(Stitcher.Result.Added, stitcher.Add(Plain(page, 30), guess));
+        Assert.Equal(chosen, stitcher.LastShift);
+    }
+
+    /// Notepad, as it went wrong: every line the same words, only a line
+    /// number at the start telling them apart. The strips over the words fit
+    /// any multiple of the line height; the line-number strip must decide.
+    [Fact]
+    public void Identical_lines_told_apart_only_by_their_numbers_still_join_at_the_true_offset()
+    {
+        const int line = 18, width = Width * 4;
+        var words = Page(line, seed: 16);
+        var digits = new Random(17);
+        var numbers = Enumerable.Range(0, 200).Select(_ => Page(line, seed: digits.Next())).ToArray();
+        var page = new uint[200 * line * width];
+        for (var y = 0; y < 200 * line; y++)
+        for (var x = 0; x < width; x++)
+            page[y * width + x] = x < 60 ? numbers[y / line][(y % line) * Width + x] : words[(y % line) * Width + x % Width];
+        uint[] At(int offset) => page.AsSpan(offset * width, View * width).ToArray();
+
+        var stitcher = new Stitcher(width, View, ignoreRight: 0);
+        stitcher.Add(At(0));
+        foreach (var o in new[] { 54, 144, 270, 432 }) // 3, 5, 7, then 9 lines
+            Assert.Equal(Stitcher.Result.Added, stitcher.Add(At(o)));
+        Assert.Equal(162, stitcher.LastShift);
+    }
+
+    /// A whole window: a sidebar that never moves on the left, a "minimap" on
+    /// the right that moves a fifth as far as the text, and the text between.
+    /// No whole row ever matches; the text strips have to outvote the rest.
+    [Fact]
+    public void A_window_with_a_still_sidebar_and_a_minimap_follows_the_text()
+    {
+        const int sidebar = 100, minimap = 100;
+        var page = Page(1600, seed: 13);
+        var map = Page(1600, seed: 14);
+        var icons = Page(View, seed: 15);
+        uint[] Window(int offset)
+        {
+            var frame = new uint[View * Width * 3];
+            var width = Width * 3;
+            for (var y = 0; y < View; y++)
+            for (var x = 0; x < width; x++)
+                frame[y * width + x] =
+                    x < sidebar ? icons[y * Width + x % Width]
+                    : x >= width - minimap ? map[(offset / 5 + y) * Width + x % Width]
+                    : page[(offset + y) * Width + (x - sidebar) % Width];
+            return frame;
+        }
+        var stitcher = new Stitcher(Width * 3, View, ignoreRight: 0);
+        stitcher.Add(Window(0));
+        foreach (var o in new[] { 110, 220, 330, 440 })
+        {
+            Assert.Equal(Stitcher.Result.Added, stitcher.Add(Window(o)));
+            Assert.Equal(110, stitcher.LastShift);
+        }
+        // Below the first frame, the sidebar is one colour rather than its
+        // icons over and over.
+        var image = stitcher.Compose();
+        var sidebarRow = image.AsSpan((View + 100) * Width * 3, 96);
+        Assert.False(sidebarRow.ContainsAnyExcept(sidebarRow[0]), "the sidebar was repeated, not continued");
+    }
+
+    /// A notification in the bottom corner and a scrollbar track along the
+    /// bottom: still, but only across part of the width. They belong in the
+    /// footer once, not in every strip that is added.
+    [Fact]
+    public void A_bar_across_part_of_the_bottom_is_footer_not_repeated()
+    {
+        var page = Page(1200, seed: 20);
+        uint[] WithToast(int offset)
+        {
+            var frame = Plain(page, offset);
+            for (var y = View - 40; y < View; y++)
+                frame.AsSpan(y * Width + Width / 2, Width / 2).Fill(0xFF224466);
+            return frame;
+        }
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        foreach (var o in new[] { 0, 100, 200, 300 }) Assert.Equal(Stitcher.Result.Added, stitcher.Add(WithToast(o)));
+        var image = stitcher.Compose();
+        var toastRows = 0;
+        for (var y = 0; y < image.Length / Width; y++)
+            if (image[y * Width + Width - 1] == 0xFF224466) toastRows++;
+        Assert.Equal(40, toastRows);
+        // And the page's left half is intact all the way down.
+        for (var y = 0; y < View + 300 - 40; y++)
+            Assert.True(image.AsSpan(y * Width, Width / 2).SequenceEqual(page.AsSpan(y * Width, Width / 2)), $"row {y}");
     }
 
     [Fact]
@@ -267,7 +357,9 @@ public class StitcherTests
         foreach (var y in new[] { 100, 160, 220, 280 }) page.AsSpan(y * Width, Width).Fill(0xFF000000 + (uint)y);
         var stitcher = new Stitcher(Width, View, ignoreRight: 0);
         stitcher.Add(Plain(page, 0));
-        Assert.Equal(Stitcher.Result.Lost, stitcher.Add(Plain(page, 50)));
+        // Lost or the end, either way it stops; what it must not do is glue.
+        Assert.NotEqual(Stitcher.Result.Added, stitcher.Add(Plain(page, 50)));
+        Assert.Equal(View, stitcher.TotalHeight);
     }
 
     [Fact]
@@ -296,7 +388,7 @@ public class StitcherTests
             for (var line = 0; line * 18 < rows; line++)
                 for (var x = 4; x < width - 20; x += random.Next(6, 16))
                     for (var y = line * 18 + 4; y < line * 18 + 14 && y < rows; y++)
-                        for (var gx = x; gx < x + 4; gx++) p[y * width + gx] = 30;
+                        for (var gx = x; gx < x + 4; gx++) p[y * width + gx] = 30 + (gx * 7 + y * 13) % 50;
             return p;
         }
         uint[] At(float[] p, double offset)
@@ -320,6 +412,43 @@ public class StitcherTests
         // Generous for a slow machine; it runs off the UI thread, but each
         // step still waits for it.
         Assert.True(clock.ElapsedMilliseconds < 1000, $"took {clock.ElapsedMilliseconds} ms");
+    }
+
+    /// VS Code scrolls past the last line. A short file then ends in blank
+    /// steps, which are trimmed to a margin, and the blank frame is the end
+    /// rather than "lost".
+    [Fact]
+    public void Scrolling_into_blank_space_ends_and_the_blank_tail_is_trimmed()
+    {
+        var page = Page(500, seed: 18);
+        var padded = new uint[(500 + 900) * Width];
+        page.CopyTo(padded, 0);
+        padded.AsSpan(500 * Width).Fill(0xFF1E1E1E);
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        Stitcher.Result result = default;
+        foreach (var o in new[] { 0, 150, 300, 450, 600, 750, 900, 1050 })
+        {
+            result = stitcher.Add(Plain(padded, o));
+            if (result != Stitcher.Result.Added) break;
+        }
+        Assert.Equal(Stitcher.Result.End, result);
+        stitcher.TrimBlankTail(keep: 24);
+        // Plus a few rows of "footer": the test page's blank paragraph gaps
+        // happen to line up at the bottom of the first two frames.
+        Assert.InRange(stitcher.TotalHeight, 500 + 24, 500 + 24 + 6);
+        var image = stitcher.Compose();
+        Assert.True(SamePage(image, page, 0, 500));
+    }
+
+    [Fact]
+    public void Trimming_stops_at_content()
+    {
+        var page = Page(800, seed: 19);
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        foreach (var o in new[] { 0, 100, 200 }) stitcher.Add(Plain(page, o));
+        var before = stitcher.TotalHeight;
+        stitcher.TrimBlankTail(keep: 24);
+        Assert.Equal(before, stitcher.TotalHeight);
     }
 
     [Fact]
