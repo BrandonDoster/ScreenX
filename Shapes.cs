@@ -9,32 +9,35 @@ namespace ScreenX;
 
 enum Kind { Rect, Ellipse, Arrow, Line, Pen, Highlight, Text, Step, Redact }
 
-/// The editor's undo history. A step is the shape list and the crop, never
-/// pixels, so it costs a few hundred bytes however large the capture is.
-/// Steps are copied going in and coming out, so editing the current shapes
-/// never reaches back into history.
+/// The editor's undo history. A step is the shape list, the crop and the
+/// cut-outs, never pixels, so it costs a few hundred bytes however large the
+/// capture is. Steps are copied going in and coming out, so editing the
+/// current shapes never reaches back into history.
 sealed class History
 {
     const int Limit = 200;
-    readonly List<(List<Shape> shapes, Rectangle crop)> steps = [];
+    readonly List<(List<Shape> shapes, Rectangle crop, Cut[] cuts)> steps = [];
     int at;
 
-    public History(Rectangle crop) => steps.Add(([], crop));
+    public History(Rectangle crop) => steps.Add(([], crop, []));
 
     public bool CanUndo => at > 0;
     public bool CanRedo => at < steps.Count - 1;
 
     /// A new step after the current one; anything that had been undone is gone.
-    public void Push(IEnumerable<Shape> shapes, Rectangle crop)
+    /// `cuts` is never changed after it is made, so it is kept as it is.
+    public void Push(IEnumerable<Shape> shapes, Rectangle crop, Cut[]? cuts = null)
     {
         steps.RemoveRange(at + 1, steps.Count - at - 1);
-        steps.Add((shapes.Select(s => s.Clone()).ToList(), crop));
+        steps.Add((shapes.Select(s => s.Clone()).ToList(), crop, cuts ?? []));
         if (steps.Count > Limit) steps.RemoveAt(0);
         at = steps.Count - 1;
     }
 
     public (List<Shape> shapes, Rectangle crop) Current =>
         (steps[at].shapes.Select(s => s.Clone()).ToList(), steps[at].crop);
+
+    public Cut[] Cuts => steps[at].cuts;
 
     public bool Undo()
     {
@@ -48,6 +51,72 @@ sealed class History
         if (!CanRedo) return false;
         at++;
         return true;
+    }
+}
+
+/// A band taken out of the image, the two sides closing up over it, as
+/// ShareX's Cut Out does: columns if `Columns`, else rows. In the coordinates
+/// of the image as it was when the cut was made, so a list of them is applied
+/// in order.
+readonly record struct Cut(bool Columns, int At, int Length)
+{
+    /// Across a drag's longer side, so dragging sideways takes out columns.
+    /// Null when nothing, or everything, would be taken out of `crop`.
+    public static Cut? Across(PointF a, PointF b, Rectangle crop)
+    {
+        var columns = Math.Abs(b.X - a.X) >= Math.Abs(b.Y - a.Y);
+        var from = Math.Max((int)Math.Round(Math.Min(columns ? a.X : a.Y, columns ? b.X : b.Y)), columns ? crop.Left : crop.Top);
+        var to = Math.Min((int)Math.Round(Math.Max(columns ? a.X : a.Y, columns ? b.X : b.Y)), columns ? crop.Right : crop.Bottom);
+        var length = to - from;
+        return length < 1 || length >= (columns ? crop.Width : crop.Height) ? null : new Cut(columns, from, length);
+    }
+
+    public bool Contains(PointF p) => (Columns ? p.X : p.Y) is var v && v >= At && v <= At + Length;
+
+    /// Past the band moves back by its length; inside it lands on the seam.
+    float Shift(float v) => v >= At + Length ? v - Length : v > At ? At : v;
+
+    PointF Shift(PointF p) => Columns ? new(Shift(p.X), p.Y) : new(p.X, Shift(p.Y));
+
+    public Rectangle Shift(Rectangle r) => Columns
+        ? Rectangle.FromLTRB((int)Shift(r.Left), r.Top, (int)Shift(r.Right), r.Bottom)
+        : Rectangle.FromLTRB(r.Left, (int)Shift(r.Top), r.Right, (int)Shift(r.Bottom));
+
+    /// Shapes wholly inside the band go with what they marked; the rest
+    /// follow the image.
+    public List<Shape> Shift(IEnumerable<Shape> shapes)
+    {
+        var kept = new List<Shape>();
+        foreach (var s in shapes)
+        {
+            if (s.Points.All(Contains)) continue;
+            var moved = s.Clone();
+            for (var i = 0; i < moved.Points.Count; i++) moved.Points[i] = Shift(moved.Points[i]);
+            kept.Add(moved);
+        }
+        return kept;
+    }
+
+    /// A new bitmap without the band; `image` is left as it was.
+    public Bitmap Apply(Bitmap image)
+    {
+        var size = Columns ? new Size(image.Width - Length, image.Height) : new Size(image.Width, image.Height - Length);
+        var cut = new Bitmap(size.Width, size.Height, image.PixelFormat);
+        using var g = Graphics.FromImage(cut);
+        // A straight copy: no blending, no resampling.
+        g.CompositingMode = CompositingMode.SourceCopy;
+        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+        var before = Columns ? new Rectangle(0, 0, At, size.Height) : new Rectangle(0, 0, size.Width, At);
+        var after = Columns
+            ? new Rectangle(At, 0, size.Width - At, size.Height)
+            : new Rectangle(0, At, size.Width, size.Height - At);
+        var from = after;
+        from.Offset(Columns ? Length : 0, Columns ? 0 : Length);
+        // Either side can be empty when the band reaches an edge.
+        if (At > 0) g.DrawImage(image, before, before, GraphicsUnit.Pixel);
+        if (after.Width > 0 && after.Height > 0) g.DrawImage(image, after, from, GraphicsUnit.Pixel);
+        return cut;
     }
 }
 

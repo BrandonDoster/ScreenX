@@ -8,6 +8,14 @@ decision. High and critical findings are fixed, not listed. Newest at the top.
 
 | Severity | Area | Item |
 | --- | --- | --- |
+| Medium | Editor | Cut out drops a Text or Step shape whose anchor is in the band (`Cut.Shift` tests `Points.All(Contains)`), though its text or circle runs past the band. Fix: test `Bounds` against the band for those two kinds. (Cut out review, 2026-10-08.) |
+| Medium | Editor | After a cut the editor holds three full-size bitmaps (`original`, `source`, `cache`), and `CutOut` peaks at four while the new one is made. Fix: dispose `cache` before `Apply` and let `Rebuild` allocate it, peak three. (Cut out review.) |
+| Low | Editor | Cut out's "Enter or click the band" hint stays in the status label when the band is dropped by starting a new drag, by a degenerate release, or by undo/redo while pending. Fix: call `Uncut()` in those places instead of clearing `pending`. (Cut out review.) |
+| Low | Editor | Undo or redo of a cut refits the zoom (the crop size changed, as after a crop); making the cut keeps it. Decide which is wanted. (Cut out review.) |
+| Low | Editor | Undo/redo across a cut rebuilds `source` from the capture through every cut: N full-image copies. Fine at a few cuts. (Cut out review.) |
+| Low | Editor | Light or dark is read once per process (`Editor.Dark`), so the resident copy ignores a Windows theme change until restarted; the settings window reads it each time it opens. (Toolbar review.) |
+| Low | Tests | Not covered: `History` with cuts, undo/redo chains through `Recut`, `Cut.Contains` at the band edges, `Across` with a crop not at the origin, a band ending at the far edge. (Cut out review.) |
+| Low | Editor | Pre-existing: a crop dragged too small to keep returns without repainting, so its dashed box stays on screen until the next paint. One `canvas.Invalidate()`. |
 | Low | Scrolling | By design (your call, 2026-10-08): a sidebar that never moves (VS Code's activity bar, a docs contents panel) repeats down the capture, as in ShareX, for cropping in the editor. Painting it over with its background was tried and erased content that shared a strip with it. |
 | Low | Scrolling | `drawn` (which sidebars have content) is judged on the first band only. Only a sidebar whose icons all sit in the first pair's header rows is missed (a strip that gets content later counts as moved, so it is no sidebar), and then a 0 from the whole-width fallback is read as the end. The capture so far is kept. An update every step was tried and removed: it almost never applied. (Round 5, low-items review.) |
 | Low | Scrolling | At 125%, a whole-window VS Code snap still copies the top line of the corner notification ("Kit'", its gear and close button) into every added strip, plus a 1 px mark at the activity bar's edge. The build before this round copied the whole notification line, so this is better, not worse. Same cause as the dragged-area notification item below. (Mixed-DPI test, 2026-10-08.) |
@@ -32,6 +40,8 @@ decision. High and critical findings are fixed, not listed. Newest at the top.
 ## Done
 
 Recorded so a later review does not raise them again.
+
+- Toolbar and Cut out review (2026-10-08). No critical or high. Raised and rejected: "`Graphics.FillRoundedRectangle` does not exist, build break": it is in System.Drawing since .NET 9, and the build and 121 tests pass. "`Cut.Apply` exact copy unverified": the pixel test covers both directions and an edge band and passes. "Icon code points unchecked": each was rendered from SegoeIcons.ttf and chosen by eye.
 
 - Low items, round 5 (2026-10-08), each batch reviewed by a second agent. Folder: a link to a share now gets the network warning (walked root-down, since walking up reached the share: a review high, fixed before commit); the picker never starts in a network folder; `\\?\C:\` folders open fine in explorer (tested), nothing to change. Images: size checked on the handle that is read, so a growing file cannot pass the limit; pipes and devices refused. Scrolling: the lost-not-end rule has a unit test. Corners: snapped is `IsWindowArranged`, not a guess from the work area.
 - Live scrolling suite still to rerun on the main display, from tag `live-test-base` (2a1ba67, sidebar painting removed) and then on the latest `windows`.

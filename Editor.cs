@@ -7,11 +7,12 @@ using System.Drawing.Text;
 
 namespace ScreenX;
 
-enum Tool { Select, Crop, Arrow, Rect, Ellipse, Line, Pen, Highlight, Text, Step, Redact }
+enum Tool { Select, Crop, Cut, Arrow, Rect, Ellipse, Line, Pen, Highlight, Text, Step, Redact }
 
 /// The annotation editor. Modeless, so the hotkeys keep working while it is
-/// open, and gone completely when it closes: its two bitmaps are the only
-/// large thing it holds, and both are disposed with it.
+/// open, and gone completely when it closes: its bitmaps (two, three once
+/// something is cut out) are the only large thing it holds, and all are
+/// disposed with it.
 sealed class Editor : Form
 {
     static readonly Color[] Swatches =
@@ -25,12 +26,12 @@ sealed class Editor : Form
     /// none and is drawn as the numbered dot it places.
     static readonly (Tool tool, string label, Keys key, char glyph)[] Tools =
     [
-        (Tool.Select, "Select", Keys.V, ''), (Tool.Arrow, "Arrow", Keys.A, ''),
-        (Tool.Rect, "Box", Keys.R, ''), (Tool.Ellipse, "Ellipse", Keys.E, ''),
-        (Tool.Line, "Line", Keys.L, ''), (Tool.Pen, "Pen", Keys.P, ''),
-        (Tool.Highlight, "Highlight", Keys.H, ''), (Tool.Text, "Text", Keys.T, ''),
-        (Tool.Step, "Step", Keys.N, '\0'), (Tool.Redact, "Redact", Keys.X, ''),
-        (Tool.Crop, "Crop", Keys.C, ''),
+        (Tool.Select, "Select", Keys.V, '\uE8B0'), (Tool.Arrow, "Arrow", Keys.A, '\uE8AD'),
+        (Tool.Rect, "Box", Keys.R, '\uE739'), (Tool.Ellipse, "Ellipse", Keys.E, '\uEA3A'),
+        (Tool.Line, "Line", Keys.L, '\uE738'), (Tool.Pen, "Pen", Keys.P, '\uEE56'),
+        (Tool.Highlight, "Highlight", Keys.H, '\uE7E6'), (Tool.Text, "Text", Keys.T, '\uE8D2'),
+        (Tool.Step, "Step", Keys.N, '\0'), (Tool.Redact, "Redact", Keys.X, '\uE80A'),
+        (Tool.Crop, "Crop", Keys.C, '\uE7A8'), (Tool.Cut, "Cut out", Keys.U, '\uE8C6'),
     ];
 
     static readonly (string label, float width)[] Sizes = [("Small", 2), ("Medium", 4), ("Large", 8)];
@@ -40,13 +41,19 @@ sealed class Editor : Form
     static readonly Color Surface = Dark ? Color.FromArgb(0x2b, 0x2b, 0x2b) : Color.FromArgb(0xf3, 0xf3, 0xf3);
 
 
-    /// The capture as it arrived. Redaction samples it, so nothing drawn on
-    /// top can leak through a pixelated block.
-    readonly Bitmap source;
+    /// The capture as it arrived. Undoing a cut-out rebuilds `source` from it.
+    readonly Bitmap original;
+    /// `original` with `cuts` taken out, and the same bitmap while there are
+    /// none. Redaction samples it, so nothing drawn on top can leak through a
+    /// pixelated block.
+    Bitmap source;
     /// `source` with every committed shape drawn on it, except `live`.
-    readonly Bitmap cache;
+    Bitmap cache;
     List<Shape> shapes = [];
     Rectangle crop;
+    Cut[] cuts = [];
+    /// Dragged out and waiting for Enter or a click on it.
+    Cut? pending;
     readonly History history;
 
     Tool tool = Tool.Arrow;
@@ -90,8 +97,8 @@ sealed class Editor : Form
     {
         this.folder = folder;
         this.path = path;
-        source = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
-        using (var g = Graphics.FromImage(source))
+        source = original = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
+        using (var g = Graphics.FromImage(original))
         {
             g.CompositingMode = CompositingMode.SourceCopy;
             // An explicit size, not DrawImageUnscaled: that scales by the
@@ -130,13 +137,13 @@ sealed class Editor : Form
         foreach (var (label, w) in Sizes)
             Button(label, Dot(Ink, size * (0.15f + w * 0.06f), size), w, $"{label} lines and text", () => SetWidth(w));
         bar.Items.Add(new ToolStripSeparator());
-        undo = Button("Undo", Glyph('', size), null, "Undo (Ctrl+Z)", Undo);
-        redo = Button("Redo", Glyph('', size), null, "Redo (Ctrl+Y)", Redo);
+        undo = Button("Undo", Glyph('\uE7A7', size), null, "Undo (Ctrl+Z)", Undo);
+        redo = Button("Redo", Glyph('\uE7A6', size), null, "Redo (Ctrl+Y)", Redo);
         bar.Items.Add(new ToolStripSeparator());
         // Copy only, without saving anything, is the everyday way out, so it
         // is the one in the accent colour.
-        var copy = Button("Copy", Glyph('', size, Color.White), null, "Copy to the clipboard, nothing saved (Ctrl+C)", Copy);
-        var save = Button("Save", Glyph('', size), null, "Save (Ctrl+S)", Save);
+        var copy = Button("Copy", Glyph('\uE8C8', size, Color.White), null, "Copy to the clipboard, nothing saved (Ctrl+C)", Copy);
+        var save = Button("Save", Glyph('\uE74E', size), null, "Save (Ctrl+S)", Save);
         copy.DisplayStyle = save.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
         bar.Items.Add(status);
         var pad = LogicalToDeviceUnits(4);
@@ -279,6 +286,7 @@ sealed class Editor : Form
         CommitText();
         tool = next;
         if (tool != Tool.Select) selected = null;
+        if (pending != null) Uncut();
         canvas.Cursor = tool == Tool.Select ? Cursors.Default : Cursors.Cross;
         UpdateBar();
         canvas.Invalidate();
@@ -325,7 +333,7 @@ sealed class Editor : Form
 
     void Commit()
     {
-        history.Push(shapes, crop);
+        history.Push(shapes, crop, cuts);
         dirty = true;
         status.Text = "";
         Rebuild();
@@ -342,7 +350,9 @@ sealed class Editor : Form
         var cropChanged = crop != restoredCrop;
         crop = restoredCrop;
         selected = null;
+        pending = null;
         if (changes) dirty = true;
+        Recut(history.Cuts);
         Rebuild();
         if (cropChanged) SetZoom(Fit());
         UpdateBar();
@@ -359,8 +369,47 @@ sealed class Editor : Form
         if (history.Redo()) Restore();
     }
 
+    /// `source` made again from the capture when the cut-outs differ. Each
+    /// step's array is its own and never changed, so the same array means the
+    /// same cuts.
+    void Recut(Cut[] next)
+    {
+        if (next == cuts) return;
+        var made = original;
+        foreach (var cut in next)
+        {
+            var smaller = cut.Apply(made);
+            if (made != original) made.Dispose();
+            made = smaller;
+        }
+        if (source != original) source.Dispose();
+        source = made;
+        cuts = next;
+    }
+
+    /// Takes the band out of the image and closes the gap, carrying shapes
+    /// and the crop across it.
+    void CutOut(Cut cut)
+    {
+        pending = null;
+        shapes = cut.Shift(shapes);
+        crop = cut.Shift(crop);
+        // From the current image, not from the capture through every cut.
+        var smaller = cut.Apply(source);
+        if (source != original) source.Dispose();
+        source = smaller;
+        cuts = [.. cuts, cut];
+        Commit();
+        SetZoom(zoom);
+    }
+
     void Rebuild()
     {
+        if (cache.Size != source.Size)
+        {
+            cache.Dispose();
+            cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
+        }
         using (var g = Graphics.FromImage(cache))
         {
             g.CompositingMode = CompositingMode.SourceCopy;
@@ -446,11 +495,17 @@ sealed class Editor : Form
                 shapes.Add(new Shape { Kind = Kind.Step, Colour = colour, Width = width, Points = [p], Number = number });
                 Commit();
                 break;
+            case Tool.Cut when pending is { } cut && cut.Contains(p):
+                CutOut(cut);
+                break;
             default:
+                // Dragging elsewhere starts the band again.
+                pending = null;
                 live = new Shape
                 {
-                    // A crop is dragged out like a box and never kept as one.
-                    Kind = tool == Tool.Crop ? Kind.Rect : Enum.Parse<Kind>(tool.ToString()),
+                    // A crop or a cut-out is dragged out like a box and never
+                    // kept as one.
+                    Kind = tool is Tool.Crop or Tool.Cut ? Kind.Rect : Enum.Parse<Kind>(tool.ToString()),
                     Colour = colour,
                     Width = width,
                     Points = [p, p],
@@ -508,6 +563,15 @@ sealed class Editor : Form
         live = null;
         if (done.Degenerate)
         {
+            canvas.Invalidate();
+            return;
+        }
+        if (tool == Tool.Cut)
+        {
+            // Shown and confirmed rather than cut at once: what goes is easy
+            // to misjudge while dragging.
+            pending = Cut.Across(done.Points[0], done.Points[1], crop);
+            status.Text = pending != null ? "Enter or click the band to cut it out, Esc to keep it" : "";
             canvas.Invalidate();
             return;
         }
@@ -652,6 +716,9 @@ sealed class Editor : Form
             case Keys.Control | Keys.Oemplus or Keys.Control | Keys.Add: SetZoom(zoom * 1.25f); return true;
             case Keys.Control | Keys.OemMinus or Keys.Control | Keys.Subtract: SetZoom(zoom * 0.8f); return true;
             case Keys.Control | Keys.D0 or Keys.Control | Keys.NumPad0: SetZoom(Fit()); return true;
+            case Keys.Enter when pending is { } cut:
+                CutOut(cut);
+                return true;
             case Keys.Delete or Keys.Back when selected != null:
                 shapes.Remove(selected);
                 selected = null;
@@ -667,6 +734,7 @@ sealed class Editor : Form
                     Restore(changes: false);
                 }
                 else if (live != null) { live = null; canvas.Invalidate(); }
+                else if (pending != null) Uncut();
                 else if (selected != null) { selected = null; canvas.Invalidate(); }
                 else Close();
                 return true;
@@ -684,13 +752,13 @@ sealed class Editor : Form
         var origin = Origin;
         var view = new Rectangle(origin, canvas.AutoScrollMinSize);
 
-        // Only the part of the image that is inside the repaint is scaled, so
-        // a zoomed-in full-screen capture costs what the window shows.
         // A hairline round the image, so a capture as dark (or light) as the
         // background still shows where it ends.
         using (var edge = new Pen(Color.FromArgb(0x30, Ink)))
             g.DrawRectangle(edge, view.X - 1, view.Y - 1, view.Width + 1, view.Height + 1);
 
+        // Only the part of the image that is inside the repaint is scaled, so
+        // a zoomed-in full-screen capture costs what the window shows.
         var clip = Rectangle.Intersect(e.ClipRectangle, view);
         if (!clip.IsEmpty)
         {
@@ -714,7 +782,12 @@ sealed class Editor : Form
         g.Transform = transform;
         g.PixelOffsetMode = PixelOffsetMode.Default;
 
-        if (live != null && tool == Tool.Crop)
+        if (tool == Tool.Cut)
+        {
+            if ((live != null ? Cut.Across(live.Points[0], live.Points[1], crop) : pending) is { } band)
+                DrawCutting(g, band);
+        }
+        else if (live != null && tool == Tool.Crop)
         {
             DrawCropping(g, live);
         }
@@ -744,6 +817,35 @@ sealed class Editor : Form
                 g.DrawRectangle(edge, square.X, square.Y, square.Width, square.Height);
             }
         }
+    }
+
+    /// The band in red across the whole image, edged where the two sides
+    /// will meet.
+    void DrawCutting(Graphics g, Cut band)
+    {
+        var box = band.Columns
+            ? new RectangleF(band.At, crop.Top, band.Length, crop.Height)
+            : new RectangleF(crop.Left, band.At, crop.Width, band.Length);
+        using var shade = new SolidBrush(Color.FromArgb(110, 0xe5, 0x48, 0x4d));
+        g.FillRectangle(shade, box);
+        using var edge = new Pen(Color.White, 1.5f / zoom) { DashStyle = DashStyle.Dash };
+        if (band.Columns)
+        {
+            g.DrawLine(edge, box.Left, box.Top, box.Left, box.Bottom);
+            g.DrawLine(edge, box.Right, box.Top, box.Right, box.Bottom);
+        }
+        else
+        {
+            g.DrawLine(edge, box.Left, box.Top, box.Right, box.Top);
+            g.DrawLine(edge, box.Left, box.Bottom, box.Right, box.Bottom);
+        }
+    }
+
+    void Uncut()
+    {
+        pending = null;
+        status.Text = "";
+        canvas.Invalidate();
     }
 
     void DrawCropping(Graphics g, Shape shape)
@@ -872,7 +974,8 @@ sealed class Editor : Form
     {
         if (disposing)
         {
-            source.Dispose();
+            if (source != original) source.Dispose();
+            original.Dispose();
             cache.Dispose();
             // A ToolStrip does not dispose the images it was given.
             foreach (ToolStripItem item in bar.Items) item.Image?.Dispose();

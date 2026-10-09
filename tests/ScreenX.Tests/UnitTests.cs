@@ -444,6 +444,63 @@ public class HistoryTests
     }
 }
 
+public class CutTests
+{
+    static readonly Rectangle Whole = new(0, 0, 100, 80);
+
+    [Fact]
+    public void A_sideways_drag_takes_out_columns_and_a_downward_one_rows()
+    {
+        Assert.Equal(new Cut(true, 10, 30), Cut.Across(new(40, 5), new(10, 9), Whole));
+        Assert.Equal(new Cut(false, 20, 15), Cut.Across(new(50, 20), new(52, 35), Whole));
+    }
+
+    [Fact]
+    public void Nothing_or_everything_is_no_cut()
+    {
+        Assert.Null(Cut.Across(new(10, 10), new(10.2f, 10), Whole));
+        Assert.Null(Cut.Across(new(0, 10), new(100, 10), Whole));
+    }
+
+    /// Exact pixels: the band is gone and both sides are copied untouched.
+    [Theory]
+    [InlineData(true, 3, 2)]
+    [InlineData(false, 1, 3)]
+    [InlineData(true, 0, 2)] // the band at an edge
+    [InlineData(false, 3, 2)]
+    public void Applying_a_cut_closes_the_gap_pixel_for_pixel(bool columns, int at, int length)
+    {
+        using var image = new Bitmap(7, 5, PixelFormat.Format32bppPArgb);
+        Color At(int x, int y) => Color.FromArgb(255, x * 30, y * 40, 7);
+        for (var y = 0; y < 5; y++)
+        for (var x = 0; x < 7; x++)
+            image.SetPixel(x, y, At(x, y));
+        using var cut = new Cut(columns, at, length).Apply(image);
+        Assert.Equal(columns ? new Size(7 - length, 5) : new Size(7, 5 - length), cut.Size);
+        for (var y = 0; y < cut.Height; y++)
+        for (var x = 0; x < cut.Width; x++)
+        {
+            var (fx, fy) = columns ? (x < at ? x : x + length, y) : (x, y < at ? y : y + length);
+            Assert.Equal(At(fx, fy).ToArgb(), cut.GetPixel(x, y).ToArgb());
+        }
+    }
+
+    [Fact]
+    public void Shapes_follow_the_image_and_those_inside_the_band_go()
+    {
+        var rows = new Cut(false, 20, 10);
+        var inside = new Shape { Kind = Kind.Rect, Points = [new(0, 22), new(50, 28)] };
+        var below = new Shape { Kind = Kind.Rect, Points = [new(0, 40), new(50, 50)] };
+        var across = new Shape { Kind = Kind.Line, Points = [new(5, 10), new(5, 25), new(5, 60)] };
+        var shifted = rows.Shift([inside, below, across]);
+        Assert.Equal(2, shifted.Count);
+        Assert.Equal([new PointF(0, 30), new PointF(50, 40)], shifted[0].Points);
+        Assert.Equal([new PointF(5, 10), new PointF(5, 20), new PointF(5, 50)], shifted[1].Points);
+        Assert.Equal(new PointF(0, 40), below.Points[0]); // the original is left alone
+        Assert.Equal(Rectangle.FromLTRB(0, 0, 100, 70), rows.Shift(Whole));
+    }
+}
+
 public class CornerTests
 {
     [Fact]
