@@ -380,12 +380,16 @@ sealed class Tray : ApplicationContext
     /// Through explorer.exe with the path as one argument, rather than handing
     /// the path to the shell to interpret: a folder named like a shell
     /// junction would otherwise open whatever the junction points at.
+    ///
+    /// Always quoted: explorer splits an unquoted argument at commas, and
+    /// ArgumentList quotes only around spaces, so "a,b" opened Documents and
+    /// "end," opened This PC. A folder name cannot contain a quote.
     void OpenFolder()
     {
         try
         {
             Directory.CreateDirectory(settings.Folder);
-            Process.Start(new ProcessStartInfo(WindowsProgram("explorer.exe")) { ArgumentList = { settings.Folder } })?.Dispose();
+            Process.Start(new ProcessStartInfo(WindowsProgram("explorer.exe"), $"\"{settings.Folder}\""))?.Dispose();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {

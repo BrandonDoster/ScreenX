@@ -121,9 +121,11 @@ should refer to Rust, egui, Tauri, `core/` or `app/`.
     `--edit` makes this reachable from downloaded files, and GDI+ would also
     parse EMF, WMF and TIFF.
 
-13. **Shell paths go through `explorer.exe` with `ArgumentList`**, not
+13. **Shell paths go through `explorer.exe` as one quoted argument**, not
     `UseShellExecute` on a user-supplied path, which the shell would
-    interpret (a folder named like a CLSID junction).
+    interpret (a folder named like a CLSID junction). Always quoted, not
+    `ArgumentList`: that quotes only around spaces, and explorer splits an
+    unquoted argument at commas ("a,b" opened Documents).
 
 ## Commands
 
