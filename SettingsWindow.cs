@@ -274,6 +274,8 @@ sealed class SettingsWindow : Form
         finally
         {
             owner.Enabled = true;
+            // As Browse does: back in front once the picker has closed.
+            owner.FindForm()?.Activate();
         }
     }
 

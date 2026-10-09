@@ -32,7 +32,15 @@ static class Program
         Application.ThreadException += Failed;
         // The settings window's folder picker, run apart so the shell
         // extensions it loads leave with it. See SettingsWindow.Browse.
-        if (args is ["--pick-folder", var start]) return SettingsWindow.PickFolder(start);
+        if (args is ["--pick-folder", var start])
+        {
+            var picked = SettingsWindow.PickFolder(start);
+            // The dialog had the foreground; handed back, Windows gives it to
+            // whatever was used before ScreenX, and the editor's next message
+            // opened behind it, unseen.
+            AllowSetForegroundWindow(-1);
+            return picked;
+        }
         // An editor on its own, for "Open with". Not the resident copy, so it
         // ends when the window closes.
         if (args is ["--edit", var file])
