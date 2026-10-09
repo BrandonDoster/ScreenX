@@ -36,9 +36,11 @@ sealed class Editor : Form
 
     static readonly (string label, float width)[] Sizes = [("Small", 2), ("Medium", 4), ("Large", 8)];
 
-    static readonly bool Dark = Application.IsDarkModeEnabled;
-    static readonly Color Ink = Dark ? Color.FromArgb(0xe8, 0xe8, 0xe8) : Color.FromArgb(0x1f, 0x1f, 0x1f);
-    static readonly Color Surface = Dark ? Color.FromArgb(0x2b, 0x2b, 0x2b) : Color.FromArgb(0xf3, 0xf3, 0xf3);
+    /// Light or dark as Windows is when this editor opens, not when the
+    /// resident process started, which can be days earlier.
+    readonly bool dark = Application.IsDarkModeEnabled;
+    Color Ink => dark ? Color.FromArgb(0xe8, 0xe8, 0xe8) : Color.FromArgb(0x1f, 0x1f, 0x1f);
+    Color Surface => dark ? Color.FromArgb(0x2b, 0x2b, 0x2b) : Color.FromArgb(0xf3, 0xf3, 0xf3);
 
 
     /// The capture as it arrived. Undoing a cut-out rebuilds `source` from it.
@@ -158,7 +160,7 @@ sealed class Editor : Form
         Controls.Add(canvas);
         Controls.Add(bar);
         canvas.Dock = DockStyle.Fill;
-        canvas.BackColor = Dark ? Color.FromArgb(0x1c, 0x1c, 0x1c) : Color.FromArgb(0xe0, 0xe0, 0xe0);
+        canvas.BackColor = dark ? Color.FromArgb(0x1c, 0x1c, 0x1c) : Color.FromArgb(0xe0, 0xe0, 0xe0);
         // Fill is laid out last, after the toolbar has taken its strip.
         canvas.BringToFront();
         canvas.Paint += PaintCanvas;
@@ -239,7 +241,7 @@ sealed class Editor : Form
         Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center,
     };
 
-    static Bitmap Glyph(char glyph, int size, Color? ink = null) => Picture(size, g =>
+    Bitmap Glyph(char glyph, int size, Color? ink = null) => Picture(size, g =>
     {
         using var font = new Font("Segoe Fluent Icons", size * 0.8f, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(ink ?? Ink);
@@ -248,7 +250,7 @@ sealed class Editor : Form
 
     /// A colour swatch or a line width. The faint ring keeps black visible on
     /// a dark toolbar and white on a light one.
-    static Bitmap Dot(Color colour, float diameter, int size) => Picture(size, g =>
+    Bitmap Dot(Color colour, float diameter, int size) => Picture(size, g =>
     {
         var at = (size - diameter) / 2;
         using var brush = new SolidBrush(colour);
@@ -257,7 +259,7 @@ sealed class Editor : Form
         g.DrawEllipse(ring, at, at, diameter, diameter);
     });
 
-    static Bitmap StepIcon(int size) => Picture(size, g =>
+    Bitmap StepIcon(int size) => Picture(size, g =>
     {
         using var brush = new SolidBrush(Ink);
         g.FillEllipse(brush, size * 0.1f, size * 0.1f, size * 0.8f, size * 0.8f);
