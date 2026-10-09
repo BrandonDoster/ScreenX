@@ -563,6 +563,38 @@ public class StitcherTests
         Assert.Equal(Stitcher.Result.Lost, stitcher.Add(With(Page(1200, seed: 26), 300)));
     }
 
+    /// The same with sparse text: the text strips cannot be matched, and the
+    /// whole width, mostly still pane and blank rows, fits at 0. That 0 is
+    /// the pane, not the page, so it is lost rather than the end.
+    [Fact]
+    public void Sparse_text_beside_a_still_pane_is_lost_not_the_end()
+    {
+        var pane = Page(View, seed: 38);
+        uint[] Sparse(int seed)
+        {
+            var random = new Random(seed);
+            var page = new uint[1200 * Width];
+            for (var y = 0; y < 1200; y++)
+            for (var x = 0; x < Width; x++)
+                page[y * Width + x] = y % 100 < 8 ? (uint)random.Next() | 0xFF000000 : 0xFFFFFFFF;
+            return page;
+        }
+        uint[] With(uint[] text, int offset)
+        {
+            var f = new uint[View * Width];
+            for (var y = 0; y < View; y++)
+            for (var x = 0; x < Width; x++)
+                f[y * Width + x] = x < Width / 2 ? pane[y * Width + x] : text[(offset + y) * Width + x];
+            return f;
+        }
+        var text = Sparse(39);
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        stitcher.Add(With(text, 0));
+        Assert.Equal(Stitcher.Result.Added, stitcher.Add(With(text, 50)));
+        // Other text in the same rows, as if the page jumped somewhere else.
+        Assert.Equal(Stitcher.Result.Lost, stitcher.Add(With(Sparse(40), 50)));
+    }
+
     /// Repeating content once the step size changes: the driver's estimate
     /// for this step decides, not the offset of the last one.
     [Fact]

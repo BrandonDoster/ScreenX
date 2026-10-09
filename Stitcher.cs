@@ -245,7 +245,9 @@ sealed class Stitcher
     /// Strips that sat still through the first scroll, and whether each has
     /// moved since. A strip that never moves is a sidebar or an activity bar.
     bool[] still = [];
-    /// Strips with anything but flat rows in the band of the first frame.
+    /// Strips with anything but flat rows in the band of the first frame. A
+    /// strip blank then that gets content later has moved, so it is no
+    /// sidebar and this does not matter for it.
     bool[] drawn = [];
     int[] movedSteps = [];
 
