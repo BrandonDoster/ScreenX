@@ -467,6 +467,87 @@ public class StitcherTests
         Assert.True(SamePage(image, page, 0, 970 + View), "content in a once-blank strip was lost");
     }
 
+    /// A still panel that highlights the current heading as the page scrolls.
+    /// Any change used to count as moving, and the panel's rows repeated.
+    [Fact]
+    public void A_panel_with_a_moving_highlight_is_still_a_sidebar()
+    {
+        const int sidebar = 100;
+        var page = Page(1600, seed: 31);
+        var icons = Page(View, seed: 32);
+        uint[] Window(int offset, int highlight)
+        {
+            var width = Width * 3;
+            var frame = new uint[View * width];
+            for (var y = 0; y < View; y++)
+            for (var x = 0; x < width; x++)
+                frame[y * width + x] = x < sidebar
+                    ? (y >= highlight && y < highlight + 16 ? 0xFF3060C0 : icons[y * Width + x])
+                    : page[(offset + y) * Width + (x - sidebar) % Width];
+            return frame;
+        }
+        var stitcher = new Stitcher(Width * 3, View, ignoreRight: 0);
+        stitcher.Add(Window(0, 20));
+        for (var step = 1; step <= 5; step++)
+            Assert.Equal(Stitcher.Result.Added, stitcher.Add(Window(step * 110, 20 + step * 20)));
+        var image = stitcher.Compose();
+        var sidebarRow = image.AsSpan((View + 100) * Width * 3, 96);
+        Assert.False(sidebarRow.ContainsAnyExcept(sidebarRow[0]), "the panel was repeated, not continued");
+    }
+
+    /// A still pane and a few long lines that reach into its strip. Whatever
+    /// counts as a sidebar, those lines must not be painted over.
+    [Fact]
+    public void Sparse_lines_beside_a_still_pane_are_kept()
+    {
+        const int width = 300, pane = 120;
+        var pane_ = Page(View, seed: 33);
+        var text = Page(1400, seed: 34);
+        // Text reaches the pane's strip (columns 100-149) only on a few rows.
+        for (var y = 0; y < 1400; y++)
+            if (y % 200 > 12) text.AsSpan(y * Width, 40).Fill(0xFFFFFFFF);
+        uint[] At(int offset)
+        {
+            var f = new uint[View * width];
+            for (var y = 0; y < View; y++)
+            for (var x = 0; x < width; x++)
+                f[y * width + x] = x < pane ? pane_[y * Width + x] : text[(offset + y) * Width + (x - pane) % Width];
+            return f;
+        }
+        var stitcher = new Stitcher(width, View, ignoreRight: 0);
+        var offsets = new[] { 0, 100, 200, 300, 400, 500, 600 };
+        foreach (var o in offsets) Assert.Equal(Stitcher.Result.Added, stitcher.Add(At(o)));
+        var image = stitcher.Compose();
+        for (var y = 0; y < 600 + View; y++)
+            Assert.True(image.AsSpan(y * width + pane, width - pane).SequenceEqual(text.AsSpan(y * Width, width - pane)), $"row {y} lost");
+    }
+
+    /// A list scrolled by whole rows, with a column that says the same thing
+    /// on almost every row ("Yes", a checkbox). Barely changing, it was taken
+    /// for a sidebar and its cells painted over.
+    ///
+    /// Depends on strip 0 being judged still on the first pair, which the
+    /// flat top rows of each cell (from `Page`) bring about. With every cell
+    /// the same, the scroll and standing still fit equally: that tie is moved.
+    [Theory]
+    [InlineData(9)]
+    [InlineData(1)] // n % 1 is never 4: every cell "Yes"
+    public void A_list_column_of_repeated_values_is_kept(int oddEvery)
+    {
+        var page = Page(1400, seed: 35);
+        var yes = Page(20, seed: 36);
+        var no = Page(20, seed: 37);
+        for (var y = 0; y < 1400; y++)
+        {
+            var cell = (y / 20) % oddEvery == 4 ? no : yes;
+            Array.Copy(cell, (y % 20) * Width, page, y * Width, 50); // strip 0, whole
+        }
+        var stitcher = new Stitcher(Width, View, ignoreRight: 0);
+        var offsets = new[] { 0, 100, 200, 300, 400, 500, 600, 700 };
+        foreach (var o in offsets) Assert.Equal(Stitcher.Result.Added, stitcher.Add(Plain(page, o)));
+        Assert.True(SamePage(stitcher.Compose(), page, 0, 700 + View), "repeated cells were painted over");
+    }
+
     /// A narrow area, three strips, with a still icon column on the left.
     /// Every judged strip being a sidebar made every row read as blank.
     [Fact]

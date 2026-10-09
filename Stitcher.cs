@@ -62,6 +62,8 @@ sealed class Stitcher
     Rows? last;
     int top, bottom = -1;
     readonly List<uint[]> added = [];
+    /// Per added row, per strip: unchanged since the frame before.
+    readonly List<bool[]> unchanged = [];
     int addedRows;
     int lastShift;
     int expected;
@@ -101,8 +103,8 @@ sealed class Stitcher
 
     /// `guess` is the driver's estimate of how far this step scrolled, in rows.
     /// It only decides between offsets that fit equally well, which repeating
-    /// content (a grid, identical list rows) always has; after the first step
-    /// the last offset seen is the better estimate and is used instead.
+    /// content (a grid, identical list rows) always has. Without one, the last
+    /// offset seen is used instead.
     public Result Add(uint[] frame, int guess = 0)
     {
         if (frame.Length != Width * Height) throw new ArgumentException("frame size changed");
@@ -155,28 +157,75 @@ sealed class Stitcher
         for (var s = 0; s < strips; s++)
             if (!still[s]) top = Math.Max(top, StillRun(last, rows, s, fromTop: true, limit));
         top = Math.Min(top, Height - bottom - 2 * MinOverlap(Height - bottom));
+        if (drawn.Length == 0)
+        {
+            // Within the band: a toolbar above a blank strip is not content.
+            drawn = new bool[strips];
+            for (var s = 0; s < strips; s++)
+                drawn[s] = Array.IndexOf(last.Flat, false, s * Height + top, Band) >= 0;
+        }
 
         var shift = Vote(last, rows, Band, track: true);
         // Narrow strips of uniform content (a document of similar lines) can
         // each be too alike to decide alone, where the whole row is not. The
         // whole width as one strip is how this matched before strips existed.
-        if (shift < 0) shift = Vote(lastWhole, whole, Band, track: false);
+        // Its rows include any sidebar, though, so sparse content beside a wide
+        // still pane matches at 0 and read as the end. With a sidebar known
+        // that 0 means nothing; lost makes the driver retry a smaller step. A
+        // real end is caught above, when the frame did not change at all.
+        if (shift < 0)
+        {
+            shift = Vote(lastWhole, whole, Band, track: false);
+            // Only a sidebar with something in it: the blank right-hand strips
+            // of a document are "sidebars" too, and counting them turned a
+            // real end with a blinking caret into lost.
+            if (shift == 0 && Enumerable.Range(0, strips).Any(s => Sidebar(s) && drawn[s])) shift = -1;
+        }
         if (shift == 0) return Result.End;
         if (shift < 0) return Result.Lost;
 
-        // Whether each strip changed at all, by looking rather than by whether
-        // its own match succeeded: a strip that is blank in the first pair and
-        // gets long lines later has no match of its own, and was then treated
-        // as a sidebar and painted over.
+        // Whether each strip moved, by looking rather than by whether its own
+        // match succeeded: a strip that is blank in the first pair and gets
+        // long lines later has no match of its own, and was then treated as a
+        // sidebar and painted over. But not on any change at all: a panel that
+        // highlights the current heading, a spinner or a badge then stopped
+        // being a sidebar and its rows repeated down the capture. Moved is
+        // most of what is drawn in the strip changing; content arriving in a
+        // blank strip is all change, a highlight in a still panel is little.
+        // Or what is drawn fitting the scroll as well as it fits standing
+        // still: a list column of the same value on every row ("Yes", a
+        // checkbox) scrolled by whole rows barely changes, and was taken for
+        // a sidebar and painted over. A sidebar's icons do not fit the scroll.
         for (var s = 0; s < strips; s++)
-            if (!rows.Hashes.AsSpan(s * Height + top, Band).SequenceEqual(last.Hashes.AsSpan(s * Height + top, Band)))
-                movedSteps[s]++;
+        {
+            int changed = 0, kept = 0, fitsStill = 0, fitsScroll = 0;
+            for (var y = top; y < top + Band; y++)
+            {
+                var i = s * Height + y;
+                if (last.Flat[i] && rows.Flat[i]) continue;
+                if (rows.Hashes[i] != last.Hashes[i]) changed++;
+                else kept++;
+                if (y + shift >= top + Band || rows.Flat[i]) continue;
+                if (rows.Hashes[i] == last.Hashes[i]) fitsStill++;
+                if (rows.Hashes[i] == last.Hashes[i + shift]) fitsScroll++;
+            }
+            if ((changed > 0 && changed >= kept) || (fitsScroll > 0 && fitsScroll >= fitsStill)) movedSteps[s]++;
+        }
 
         // The new rows are the bottom `shift` rows of this frame's band, just
         // above the footer.
+        var from = Height - bottom - shift;
         var strip = new uint[shift * Width];
-        Array.Copy(frame, (Height - bottom - shift) * Width, strip, 0, strip.Length);
+        Array.Copy(frame, from * Width, strip, 0, strip.Length);
         added.Add(strip);
+        // Which of the new rows sat still in each strip: only those are ever
+        // repainted as a sidebar, so content arriving in a strip taken for
+        // one is kept.
+        var same = new bool[shift * strips];
+        for (var k = 0; k < shift; k++)
+            for (var s = 0; s < strips; s++)
+                same[k * strips + s] = rows.Hashes[s * Height + from + k] == last.Hashes[s * Height + from + k];
+        unchanged.Add(same);
         addedRows += shift;
         lastShift = shift;
         previous = frame;
@@ -209,6 +258,8 @@ sealed class Stitcher
     /// Strips that sat still through the first scroll, and whether each has
     /// moved since. A strip that never moves is a sidebar or an activity bar.
     bool[] still = [];
+    /// Strips with anything but flat rows in the band of the first frame.
+    bool[] drawn = [];
     int[] movedSteps = [];
 
     bool Sidebar(int s) => still.Length > s && still[s] && movedSteps[s] == 0;
@@ -537,12 +588,14 @@ sealed class Stitcher
             if (rows <= cut)
             {
                 added.RemoveAt(added.Count - 1);
+                unchanged.RemoveAt(unchanged.Count - 1);
                 addedRows -= rows;
                 cut -= rows;
             }
             else
             {
                 added[^1] = strip.AsSpan(0, (rows - cut) * Width).ToArray();
+                unchanged[^1] = unchanged[^1][..((rows - cut) * strips)];
                 addedRows -= cut;
                 cut = 0;
             }
@@ -561,21 +614,19 @@ sealed class Stitcher
         var head = Height - footer;
         first.AsSpan(0, head * Width).CopyTo(output);
         var at = head * Width;
-        var from = at;
-        foreach (var strip in added)
-        {
-            strip.CopyTo(output[at..]);
-            at += strip.Length;
-        }
         // A sidebar never moved, so every added row of it is the same icons
         // again: a column of repeated activity-bar buttons down the image. It
         // is continued as its own background instead.
+        var colours = new uint?[strips];
         for (var s = 0; s < strips; s++)
+            if (Sidebar(s)) colours[s] = Background(first, s, head);
+        for (var i = 0; i < added.Count; i++)
         {
-            if (!Sidebar(s)) continue;
-            var colour = Background(first, s, head);
-            for (var row = from; row < at; row += Width)
-                output.Slice(row + s * stripWidth, stripWidth).Fill(colour);
+            added[i].CopyTo(output[at..]);
+            for (var k = 0; k < added[i].Length / Width; k++, at += Width)
+                for (var s = 0; s < strips; s++)
+                    if (colours[s] is { } colour && unchanged[i][k * strips + s])
+                        output.Slice(at + s * stripWidth, stripWidth).Fill(colour);
         }
         previous.AsSpan(head * Width, footer * Width).CopyTo(output[at..]);
     }
