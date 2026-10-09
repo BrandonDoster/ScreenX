@@ -521,6 +521,13 @@ sealed class Editor : Form
         if (e.Button != MouseButtons.Left) return;
         CommitText();
         canvas.Focus();
+        if (cache == null)
+        {
+            // The canvas ran out of memory and says to click: try again, and
+            // do nothing else with this click.
+            Rebuild();
+            return;
+        }
         var p = ToImage(e.Location);
         switch (tool)
         {
@@ -816,8 +823,12 @@ sealed class Editor : Form
         // Only the part of the image that is inside the repaint is scaled, so
         // a zoomed-in full-screen capture costs what the window shows.
         var clip = Rectangle.Intersect(e.ClipRectangle, view);
-        // No cache only if making one ran out of memory; paint nothing then.
-        if (!clip.IsEmpty && cache != null)
+        // No cache only if making one ran out of memory. Not retried here: a
+        // retry that fails invalidates, which would repaint forever.
+        if (cache == null)
+            TextRenderer.DrawText(g, "Not enough memory to show this image. Click to try again.", Font, view, Ink,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+        else if (!clip.IsEmpty)
         {
             var src = Rectangle.FromLTRB(
                 crop.X + (int)Math.Floor((clip.Left - origin.X) / zoom),
