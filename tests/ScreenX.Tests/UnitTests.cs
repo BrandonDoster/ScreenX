@@ -175,6 +175,9 @@ public class FrameTests
     }
 }
 
+/// One collection with CutTests: both measure text through `Shape.Measuring`, a
+/// single GDI+ Graphics that throws when two test threads use it at once.
+[Collection("Measuring")]
 public class ShapeTests
 {
     static Shape Box(float x, float y, float w, float h) =>
@@ -444,6 +447,7 @@ public class HistoryTests
     }
 }
 
+[Collection("Measuring")]
 public class CutTests
 {
     static readonly Rectangle Whole = new(0, 0, 100, 80);
@@ -498,6 +502,19 @@ public class CutTests
         Assert.Equal([new PointF(5, 10), new PointF(5, 20), new PointF(5, 50)], shifted[1].Points);
         Assert.Equal(new PointF(0, 40), below.Points[0]); // the original is left alone
         Assert.Equal(Rectangle.FromLTRB(0, 0, 100, 70), rows.Shift(Whole));
+    }
+
+    /// Text and steps are one point that draws outward: judged by what they
+    /// cover, so a label anchored in the band but running past it stays.
+    [Fact]
+    public void Text_and_steps_go_only_when_all_they_cover_is_in_the_band()
+    {
+        var columns = new Cut(true, 20, 60);
+        var label = new Shape { Kind = Kind.Text, Width = 4, Points = [new(30, 5)], Text = "a label long enough to pass the band" };
+        var step = new Shape { Kind = Kind.Step, Width = 2, Number = 1, Points = [new(50, 40)] }; // radius 16
+        var kept = columns.Shift([label, step]);
+        Assert.Equal(Kind.Text, kept.Single().Kind);
+        Assert.Equal(new PointF(20, 5), kept[0].Points[0]); // anchor lands on the seam
     }
 }
 

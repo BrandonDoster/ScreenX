@@ -82,6 +82,15 @@ readonly record struct Cut(bool Columns, int At, int Length)
         ? Rectangle.FromLTRB((int)Shift(r.Left), r.Top, (int)Shift(r.Right), r.Bottom)
         : Rectangle.FromLTRB(r.Left, (int)Shift(r.Top), r.Right, (int)Shift(r.Bottom));
 
+    /// Text and steps draw out from one point, so all they cover counts, not
+    /// the point: a label anchored in the band can run well past it.
+    bool Holds(Shape s)
+    {
+        if (s.Kind is not (Kind.Text or Kind.Step)) return s.Points.All(Contains);
+        var b = s.Bounds;
+        return Columns ? b.Left >= At && b.Right <= At + Length : b.Top >= At && b.Bottom <= At + Length;
+    }
+
     /// Shapes wholly inside the band go with what they marked; the rest
     /// follow the image.
     public List<Shape> Shift(IEnumerable<Shape> shapes)
@@ -89,7 +98,7 @@ readonly record struct Cut(bool Columns, int At, int Length)
         var kept = new List<Shape>();
         foreach (var s in shapes)
         {
-            if (s.Points.All(Contains)) continue;
+            if (Holds(s)) continue;
             var moved = s.Clone();
             for (var i = 0; i < moved.Points.Count; i++) moved.Points[i] = Shift(moved.Points[i]);
             kept.Add(moved);
