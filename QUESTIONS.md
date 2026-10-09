@@ -21,17 +21,31 @@ Questions:
     screenshots from the start, and Windows now lists it as not present. Its
     scale is back at 100%. Is it switched off or asleep? If it is still gone
     after you power-cycle it, tell me.
-12A.
+12A. Switched the display inputs to the work PC, which is likely why it
+    dropped off. Untested parts (the editor moved between scales) wait.
 
 13. **Commit.** Everything from this round is uncommitted on `windows`. One
     commit, or one per item? Say when.
-13A.
+13A. One per batch of work: change, test, confirm, commit, next. Done for
+    round 5 as six commits.
 
 14. **Per-column sidebars.** The last review left one medium: where a
     48 px strip straddles a pane edge, repeated list cells beside the pane
     can still be painted over. The fix is to decide "sidebar" per column
     instead of per strip; about 30 lines plus a full live rerun. Do it next?
-14A.
+14A. Not now. ShareX repeats the bottom of VS Code's sidebar on every step;
+    repeats are acceptable because the editor can crop them. Brandon will use
+    it for a while to settle the flow. Left open in REVIEW-NOTES.md.
+
+## Future features (not day one)
+
+- **Capture from the command line.** For agents and scripts:
+  `ScreenX.exe --capture screen | window "<title>" | region x,y,w,h`, saving
+  to the screenshots folder by default, with a parameter for another output
+  folder, printing the saved path. No setting: anything on the machine can
+  already read the screen or drive ScreenX with synthetic input, so a toggle
+  would not protect anything. A capture started this way exits once it is
+  done and must not touch the copy of ScreenX the user is running.
 
 ## Where your answers stand (2026-10-08)
 
