@@ -47,8 +47,9 @@ sealed class Editor : Form
     /// none. Redaction samples it, so nothing drawn on top can leak through a
     /// pixelated block.
     Bitmap source;
-    /// `source` with every committed shape drawn on it, except `live`.
-    Bitmap cache;
+    /// `source` with every committed shape drawn on it, except `live`. Made by
+    /// Rebuild; null only while a cut-out is making a new `source`.
+    Bitmap? cache;
     List<Shape> shapes = [];
     Rectangle crop;
     Cut[] cuts = [];
@@ -106,7 +107,6 @@ sealed class Editor : Form
             // came out enlarged and clipped.
             g.DrawImage(image, new Rectangle(0, 0, image.Width, image.Height));
         }
-        cache = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
         crop = new Rectangle(Point.Empty, image.Size);
         history = new History(crop);
 
@@ -375,6 +375,9 @@ sealed class Editor : Form
     void Recut(Cut[] next)
     {
         if (next == cuts) return;
+        // Both old images go first, so this never holds more than the
+        // capture and two cut images; Rebuild makes the cache again.
+        DropImages();
         var made = original;
         foreach (var cut in next)
         {
@@ -382,9 +385,17 @@ sealed class Editor : Form
             if (made != original) made.Dispose();
             made = smaller;
         }
-        if (source != original) source.Dispose();
         source = made;
         cuts = next;
+    }
+
+    /// The cut image and the cache, given back before a new size is made.
+    void DropImages()
+    {
+        cache?.Dispose();
+        cache = null;
+        if (source != original) source.Dispose();
+        source = original;
     }
 
     /// Takes the band out of the image and closes the gap, carrying shapes
@@ -395,8 +406,12 @@ sealed class Editor : Form
         shapes = cut.Shift(shapes);
         crop = cut.Shift(crop);
         // From the current image, not from the capture through every cut.
+        // The cache goes first, so this holds three full images at most: the
+        // capture, the current cut and the new one.
+        cache?.Dispose();
+        cache = null;
         var smaller = cut.Apply(source);
-        if (source != original) source.Dispose();
+        DropImages();
         source = smaller;
         cuts = [.. cuts, cut];
         Commit();
@@ -405,9 +420,9 @@ sealed class Editor : Form
 
     void Rebuild()
     {
-        if (cache.Size != source.Size)
+        if (cache?.Size != source.Size)
         {
-            cache.Dispose();
+            cache?.Dispose();
             cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
         }
         using (var g = Graphics.FromImage(cache))
@@ -774,7 +789,7 @@ sealed class Editor : Form
             // a pre-scaled cache if fitting a huge capture ever feels slow.
             g.InterpolationMode = zoom < 1 ? InterpolationMode.HighQualityBilinear : InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(cache, dest, src, GraphicsUnit.Pixel);
+            g.DrawImage(cache!, dest, src, GraphicsUnit.Pixel);
         }
 
         g.SetClip(view);
@@ -869,7 +884,7 @@ sealed class Editor : Form
         selected = null;
         live = null;
         Rebuild();
-        return cache.Clone(crop, PixelFormat.Format32bppArgb);
+        return cache!.Clone(crop, PixelFormat.Format32bppArgb);
     }
 
     void Copy()
@@ -976,7 +991,7 @@ sealed class Editor : Form
         {
             if (source != original) source.Dispose();
             original.Dispose();
-            cache.Dispose();
+            cache?.Dispose();
             // A ToolStrip does not dispose the images it was given.
             foreach (ToolStripItem item in bar.Items) item.Image?.Dispose();
         }
