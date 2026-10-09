@@ -3,6 +3,7 @@
 
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
 
 namespace ScreenX;
 
@@ -20,15 +21,23 @@ sealed class Editor : Form
         Color.White, Color.Black,
     ];
 
-    static readonly (Tool tool, string label, Keys key)[] Tools =
+    /// Icons are Segoe Fluent Icons glyphs, which Windows 11 ships; Step has
+    /// none and is drawn as the numbered dot it places.
+    static readonly (Tool tool, string label, Keys key, char glyph)[] Tools =
     [
-        (Tool.Select, "Select", Keys.V), (Tool.Arrow, "Arrow", Keys.A), (Tool.Rect, "Box", Keys.R),
-        (Tool.Ellipse, "Ellipse", Keys.E), (Tool.Line, "Line", Keys.L), (Tool.Pen, "Pen", Keys.P),
-        (Tool.Highlight, "Highlight", Keys.H), (Tool.Text, "Text", Keys.T), (Tool.Step, "Step", Keys.N),
-        (Tool.Redact, "Redact", Keys.X), (Tool.Crop, "Crop", Keys.C),
+        (Tool.Select, "Select", Keys.V, ''), (Tool.Arrow, "Arrow", Keys.A, ''),
+        (Tool.Rect, "Box", Keys.R, ''), (Tool.Ellipse, "Ellipse", Keys.E, ''),
+        (Tool.Line, "Line", Keys.L, ''), (Tool.Pen, "Pen", Keys.P, ''),
+        (Tool.Highlight, "Highlight", Keys.H, ''), (Tool.Text, "Text", Keys.T, ''),
+        (Tool.Step, "Step", Keys.N, '\0'), (Tool.Redact, "Redact", Keys.X, ''),
+        (Tool.Crop, "Crop", Keys.C, ''),
     ];
 
-    static readonly (string label, float width)[] Sizes = [("S", 2), ("M", 4), ("L", 8)];
+    static readonly (string label, float width)[] Sizes = [("Small", 2), ("Medium", 4), ("Large", 8)];
+
+    static readonly bool Dark = Application.IsDarkModeEnabled;
+    static readonly Color Ink = Dark ? Color.FromArgb(0xe8, 0xe8, 0xe8) : Color.FromArgb(0x1f, 0x1f, 0x1f);
+    static readonly Color Surface = Dark ? Color.FromArgb(0x2b, 0x2b, 0x2b) : Color.FromArgb(0xf3, 0xf3, 0xf3);
 
 
     /// The capture as it arrived. Redaction samples it, so nothing drawn on
@@ -100,36 +109,49 @@ sealed class Editor : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.Manual;
 
-        void Button(ToolStripButton button, Action click)
+        // Drawn at this window's DPI rather than scaled up from 16 px.
+        // ponytail: drawn once; moving to a monitor of another DPI scales them
+        // (softer), redraw on DpiChanged if that bothers anyone.
+        var size = LogicalToDeviceUnits(20);
+        bar.ImageScalingSize = new Size(size, size);
+        ToolStripButton Button(string label, Bitmap icon, object? tag, string tip, Action click)
         {
+            var button = new ToolStripButton(label, icon) { Tag = tag, ToolTipText = tip, DisplayStyle = ToolStripItemDisplayStyle.Image };
             button.Click += (_, _) => click();
             bar.Items.Add(button);
+            return button;
         }
-        foreach (var (t, label, key) in Tools)
-            Button(new ToolStripButton(label) { Tag = t, ToolTipText = $"{label} ({key})" }, () => SetTool(t));
+        foreach (var (t, label, key, glyph) in Tools)
+            Button(label, t == Tool.Step ? StepIcon(size) : Glyph(glyph, size), t, $"{label} ({key})", () => SetTool(t));
         bar.Items.Add(new ToolStripSeparator());
         foreach (var swatch in Swatches)
-            Button(new ToolStripButton(Square(swatch)) { Tag = swatch, ToolTipText = "Colour" }, () => SetColour(swatch));
+            Button("Colour", Dot(swatch, size * 0.65f, size), swatch, "Colour", () => SetColour(swatch));
         bar.Items.Add(new ToolStripSeparator());
         foreach (var (label, w) in Sizes)
-            Button(new ToolStripButton(label) { Tag = w, ToolTipText = "Line and text size" }, () => SetWidth(w));
+            Button(label, Dot(Ink, size * (0.15f + w * 0.06f), size), w, $"{label} lines and text", () => SetWidth(w));
         bar.Items.Add(new ToolStripSeparator());
-        undo = new ToolStripButton("Undo") { ToolTipText = "Undo (Ctrl+Z)" };
-        undo.Click += (_, _) => Undo();
-        redo = new ToolStripButton("Redo") { ToolTipText = "Redo (Ctrl+Y)" };
-        redo.Click += (_, _) => Redo();
-        bar.Items.AddRange([undo, redo, new ToolStripSeparator()]);
-        // Copy only, without saving anything, is the everyday way out.
-        var copy = new ToolStripButton("Copy") { ToolTipText = "Copy to the clipboard, nothing saved (Ctrl+C)" };
-        copy.Click += (_, _) => Copy();
-        var save = new ToolStripButton("Save") { ToolTipText = "Save (Ctrl+S)" };
-        save.Click += (_, _) => Save();
-        bar.Items.AddRange([copy, save, status]);
+        undo = Button("Undo", Glyph('', size), null, "Undo (Ctrl+Z)", Undo);
+        redo = Button("Redo", Glyph('', size), null, "Redo (Ctrl+Y)", Redo);
+        bar.Items.Add(new ToolStripSeparator());
+        // Copy only, without saving anything, is the everyday way out, so it
+        // is the one in the accent colour.
+        var copy = Button("Copy", Glyph('', size, Color.White), null, "Copy to the clipboard, nothing saved (Ctrl+C)", Copy);
+        var save = Button("Save", Glyph('', size), null, "Save (Ctrl+S)", Save);
+        copy.DisplayStyle = save.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+        bar.Items.Add(status);
+        var pad = LogicalToDeviceUnits(4);
+        foreach (ToolStripItem item in bar.Items)
+        {
+            item.Margin = new Padding(1, 2, 1, 2);
+            if (item is ToolStripButton) item.Padding = new Padding(pad);
+        }
+        status.ForeColor = Color.FromArgb((Ink.R + Surface.R) / 2, (Ink.G + Surface.G) / 2, (Ink.B + Surface.B) / 2);
+        bar.Renderer = new BarRenderer(Surface, Ink, copy);
 
         Controls.Add(canvas);
         Controls.Add(bar);
         canvas.Dock = DockStyle.Fill;
-        canvas.BackColor = Color.FromArgb(0x20, 0x20, 0x20);
+        canvas.BackColor = Dark ? Color.FromArgb(0x1c, 0x1c, 0x1c) : Color.FromArgb(0xe0, 0xe0, 0xe0);
         // Fill is laid out last, after the toolbar has taken its strip.
         canvas.BringToFront();
         canvas.Paint += PaintCanvas;
@@ -194,15 +216,48 @@ sealed class Editor : Form
         canvas.Invalidate();
     }
 
-    static Bitmap Square(Color colour)
+    static Bitmap Picture(int size, Action<Graphics> draw)
     {
-        var square = new Bitmap(16, 16);
-        using var g = Graphics.FromImage(square);
-        using var brush = new SolidBrush(colour);
-        g.FillRectangle(brush, 1, 1, 14, 14);
-        g.DrawRectangle(Pens.Gray, 1, 1, 13, 13);
-        return square;
+        var icon = new Bitmap(size, size);
+        using var g = Graphics.FromImage(icon);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        // Not ClearType: its colour fringes are wrong on a transparent bitmap.
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        draw(g);
+        return icon;
     }
+
+    static readonly StringFormat Centred = new(StringFormat.GenericTypographic)
+    {
+        Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center,
+    };
+
+    static Bitmap Glyph(char glyph, int size, Color? ink = null) => Picture(size, g =>
+    {
+        using var font = new Font("Segoe Fluent Icons", size * 0.8f, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(ink ?? Ink);
+        g.DrawString(glyph.ToString(), font, brush, new RectangleF(0, 0, size, size), Centred);
+    });
+
+    /// A colour swatch or a line width. The faint ring keeps black visible on
+    /// a dark toolbar and white on a light one.
+    static Bitmap Dot(Color colour, float diameter, int size) => Picture(size, g =>
+    {
+        var at = (size - diameter) / 2;
+        using var brush = new SolidBrush(colour);
+        g.FillEllipse(brush, at, at, diameter, diameter);
+        using var ring = new Pen(Color.FromArgb(0x60, Ink));
+        g.DrawEllipse(ring, at, at, diameter, diameter);
+    });
+
+    static Bitmap StepIcon(int size) => Picture(size, g =>
+    {
+        using var brush = new SolidBrush(Ink);
+        g.FillEllipse(brush, size * 0.1f, size * 0.1f, size * 0.8f, size * 0.8f);
+        using var font = new Font("Segoe UI", size * 0.5f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var number = new SolidBrush(Surface);
+        g.DrawString("1", font, number, new RectangleF(0, 0, size, size), Centred);
+    });
 
     void UpdateBar()
     {
@@ -616,7 +671,7 @@ sealed class Editor : Form
                 else Close();
                 return true;
         }
-        foreach (var (t, _, key) in Tools)
+        foreach (var (t, _, key, _) in Tools)
             if (keys == key) { SetTool(t); return true; }
         return base.ProcessCmdKey(ref msg, keys);
     }
@@ -631,6 +686,11 @@ sealed class Editor : Form
 
         // Only the part of the image that is inside the repaint is scaled, so
         // a zoomed-in full-screen capture costs what the window shows.
+        // A hairline round the image, so a capture as dark (or light) as the
+        // background still shows where it ends.
+        using (var edge = new Pen(Color.FromArgb(0x30, Ink)))
+            g.DrawRectangle(edge, view.X - 1, view.Y - 1, view.Width + 1, view.Height + 1);
+
         var clip = Rectangle.Intersect(e.ClipRectangle, view);
         if (!clip.IsEmpty)
         {
@@ -814,6 +874,8 @@ sealed class Editor : Form
         {
             source.Dispose();
             cache.Dispose();
+            // A ToolStrip does not dispose the images it was given.
+            foreach (ToolStripItem item in bar.Items) item.Image?.Dispose();
         }
         base.Dispose(disposing);
         // `ScreenX.` because a Form has a `Capture` property of its own.
@@ -854,5 +916,72 @@ sealed class Canvas : ScrollableControl
     {
         base.OnScroll(se);
         Invalidate();
+    }
+}
+
+/// A flat toolbar. The system renderer frames each checked button in a raised
+/// box and greys disabled icons to near invisible on a dark bar.
+sealed class BarRenderer(Color surface, Color ink, ToolStripItem primary) : ToolStripRenderer
+{
+    static readonly Color Accent = Color.FromArgb(0x3d, 0x8b, 0xfd);
+
+    protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+    {
+        using var brush = new SolidBrush(surface);
+        e.Graphics.FillRectangle(brush, e.AffectedBounds);
+    }
+
+    protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+    {
+        using var pen = new Pen(Color.FromArgb(0x20, ink));
+        var b = e.ToolStrip.ClientRectangle;
+        e.Graphics.DrawLine(pen, b.Left, b.Bottom - 1, b.Right, b.Bottom - 1);
+    }
+
+    protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
+    {
+        var button = (ToolStripButton)e.Item;
+        var fill = button == primary
+                ? (button.Pressed ? ControlPaint.Dark(Accent, 0.05f) : button.Selected ? ControlPaint.Light(Accent, 0.2f) : Accent)
+            : button.Pressed ? Color.FromArgb(0x30, ink)
+            : button.Checked ? Color.FromArgb(0x60, Accent)
+            : button.Selected ? Color.FromArgb(0x18, ink)
+            : Color.Empty;
+        if (fill.IsEmpty) return;
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var brush = new SolidBrush(fill);
+        var radius = e.Item.Height / 5;
+        g.FillRoundedRectangle(brush, new Rectangle(Point.Empty, e.Item.Size), new Size(radius, radius));
+    }
+
+    protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+    {
+        using var pen = new Pen(Color.FromArgb(0x30, ink));
+        var x = e.Item.Width / 2;
+        e.Graphics.DrawLine(pen, x, e.Item.Height / 4, x, e.Item.Height * 3 / 4);
+    }
+
+    protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+    {
+        if (e.Item == primary) e.TextColor = Color.White;
+        else if (e.Item is ToolStripButton) e.TextColor = ink;
+        base.OnRenderItemText(e);
+    }
+
+    /// Faded rather than greyed, so Undo with nothing to undo still reads as
+    /// Undo.
+    protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
+    {
+        if (e.Image == null) return;
+        if (e.Item.Enabled)
+        {
+            e.Graphics.DrawImage(e.Image, e.ImageRectangle);
+            return;
+        }
+        using var faded = new ImageAttributes();
+        faded.SetColorMatrix(new ColorMatrix { Matrix33 = 0.35f });
+        var r = e.ImageRectangle;
+        e.Graphics.DrawImage(e.Image, r, 0, 0, e.Image.Width, e.Image.Height, GraphicsUnit.Pixel, faded);
     }
 }
