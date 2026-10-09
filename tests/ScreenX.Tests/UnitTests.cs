@@ -466,26 +466,46 @@ public class CutTests
         Assert.Null(Cut.Across(new(0, 10), new(100, 10), Whole));
     }
 
-    /// Exact pixels: the band is gone and both sides are copied untouched.
+    [Fact]
+    public void A_drag_past_a_crop_away_from_the_origin_is_held_to_the_crop()
+    {
+        var crop = new Rectangle(50, 30, 100, 80);
+        Assert.Equal(new Cut(true, 50, 40), Cut.Across(new(10, 40), new(90, 45), crop));
+        Assert.Equal(new Cut(false, 90, 20), Cut.Across(new(60, 90), new(61, 300), crop));
+    }
+
+    /// Points sit on pixel edges, so the band's far edge is in it: a box drawn
+    /// exactly over the band goes, rather than staying as a flat line.
+    [Fact]
+    public void A_box_exactly_over_the_band_goes()
+    {
+        var rows = new Cut(false, 20, 10);
+        Assert.True(rows.Contains(new(0, 20)) && rows.Contains(new(0, 30)));
+        Assert.False(rows.Contains(new(0, 19.9f)) || rows.Contains(new(0, 30.1f)));
+        Assert.Empty(rows.Shift([new Shape { Kind = Kind.Rect, Points = [new(0, 20), new(50, 30)] }]));
+    }
+
+    /// Exact pixels, translucent ones included: the band is gone and both
+    /// sides are copied untouched.
     [Theory]
     [InlineData(true, 3, 2)]
     [InlineData(false, 1, 3)]
-    [InlineData(true, 0, 2)] // the band at an edge
+    [InlineData(true, 0, 2)] // the band at the near edge
+    [InlineData(true, 5, 2)] // and at the far edge
     [InlineData(false, 3, 2)]
     public void Applying_a_cut_closes_the_gap_pixel_for_pixel(bool columns, int at, int length)
     {
         using var image = new Bitmap(7, 5, PixelFormat.Format32bppPArgb);
-        Color At(int x, int y) => Color.FromArgb(255, x * 30, y * 40, 7);
         for (var y = 0; y < 5; y++)
         for (var x = 0; x < 7; x++)
-            image.SetPixel(x, y, At(x, y));
+            image.SetPixel(x, y, Color.FromArgb(40 + x * 30, x * 30, y * 40, 7));
         using var cut = Cut.Apply(image, [new Cut(columns, at, length)]);
         Assert.Equal(columns ? new Size(7 - length, 5) : new Size(7, 5 - length), cut.Size);
         for (var y = 0; y < cut.Height; y++)
         for (var x = 0; x < cut.Width; x++)
         {
             var (fx, fy) = columns ? (x < at ? x : x + length, y) : (x, y < at ? y : y + length);
-            Assert.Equal(At(fx, fy).ToArgb(), cut.GetPixel(x, y).ToArgb());
+            Assert.Equal(image.GetPixel(fx, fy).ToArgb(), cut.GetPixel(x, y).ToArgb());
         }
     }
 
@@ -549,7 +569,8 @@ public class CutTests
     }
 
     /// A step is the point it marks: cut that point and the step goes, even
-    /// with its circle reaching out of the band; keep it and it stays put.
+    /// with its circle reaching out of the band; keep it and it moves with
+    /// the image.
     [Fact]
     public void A_step_goes_with_its_point()
     {
@@ -557,6 +578,30 @@ public class CutTests
         Assert.Empty(columns.Shift([Step(75, 40)])); // circle reaches 91, past the band
         var beside = columns.Shift([Step(90, 40)]).Single(); // circle reaches into the band
         Assert.Equal(new PointF(30, 40), beside.Points[0]);
+        var rows = new Cut(false, 20, 60);
+        Assert.Empty(rows.Shift([Step(40, 75)]));
+        Assert.Equal(new PointF(40, 30), rows.Shift([Step(40, 90)]).Single().Points[0]);
+    }
+
+    /// Each step keeps its own cuts, so undo puts the image back as it was.
+    [Fact]
+    public void History_keeps_the_cuts_of_each_step()
+    {
+        var history = new History(Whole);
+        Assert.Empty(history.Cuts);
+        Cut[] one = [new(true, 10, 5)];
+        Cut[] two = [.. one, new(false, 3, 4)];
+        history.Push([], Whole, one);
+        history.Push([], Whole, two);
+        Assert.Same(two, history.Cuts);
+        history.Undo();
+        Assert.Same(one, history.Cuts);
+        history.Undo();
+        Assert.Empty(history.Cuts);
+        history.Redo();
+        Assert.Same(one, history.Cuts);
+        history.Push([], Whole); // a step without cuts given has none
+        Assert.Empty(history.Cuts);
     }
 }
 
