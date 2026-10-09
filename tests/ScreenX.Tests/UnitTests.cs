@@ -583,6 +583,21 @@ public class CutTests
         Assert.Equal(new PointF(40, 30), rows.Shift([Step(40, 90)]).Single().Points[0]);
     }
 
+    /// A pen stroke drops its samples in the band rather than piling them on
+    /// the seam, and goes if fewer than two are left to draw.
+    [Fact]
+    public void A_pen_stroke_drops_its_samples_in_the_band()
+    {
+        var rows = new Cut(false, 20, 10);
+        var across = new Shape { Kind = Kind.Pen, Points = [new(5, 10), new(6, 22), new(7, 28), new(8, 40)] };
+        Assert.Equal([new PointF(5, 10), new PointF(8, 30)], rows.Shift([across]).Single().Points);
+        var mostlyIn = new Shape { Kind = Kind.Pen, Points = [new(5, 22), new(6, 25), new(7, 35)] };
+        Assert.Empty(rows.Shift([mostlyIn]));
+        // Other kinds still clamp to the seam.
+        var line = new Shape { Kind = Kind.Line, Points = [new(5, 25), new(5, 40)] };
+        Assert.Equal([new PointF(5, 20), new PointF(5, 30)], rows.Shift([line]).Single().Points);
+    }
+
     /// Each step keeps its own cuts, so undo puts the image back as it was.
     [Fact]
     public void History_keeps_the_cuts_of_each_step()
