@@ -1,109 +1,76 @@
-# ScreenX (Windows)
+# ScreenX
 
-Screenshot tool for Windows 11. C# / .NET 10 WinForms, one resident process,
-no network code.
+A lightweight screenshot tool for Windows 11. It sits in the tray, uses no
+CPU while idle, and never touches the network.
 
-Idle is the design goal: between screenshots the process sits in `GetMessage`
-with no timers, no polling and no background GC thread. Measured on a
-two-monitor desktop (5120x1440 + 1920x720), approximate:
+## Install and update
 
-| | |
-| --- | --- |
-| Idle CPU | 0 ms over 10 s |
-| Idle memory | ~11 MB private, under 10 MB working set |
-| Hotkey to overlay on screen | ~85-150 ms (screen read ~60 ms of that) |
+```powershell
+irm https://github.com/BrandonDoster/ScreenX/releases/latest/download/installer.ps1 | iex
+```
 
-## Use
+This installs ScreenX to `%LOCALAPPDATA%\Programs\ScreenX`, starts it, and
+sets it to start with Windows. Run the same line again to update. Close any
+ScreenX editor windows first, since updating restarts ScreenX.
 
-- `Control+Shift+Q`: region. Hover to pick a window (or the monitor under the
-  pointer) and click, or drag a rectangle. A magnifier shows the pixels under
-  the pointer, and the arrow keys move it one pixel at a time (ten with
-  Shift). Enter takes the highlighted area; Esc or right click cancels. A
-  whole window on Windows 11 keeps its rounded corners, transparent.
-- **Capture screen** (tray menu, or set a hotkey): the monitor under the
-  pointer, no overlay.
-- **Scrolling capture** (tray menu, or set a hotkey): choose the area as for a
-  region, then ScreenX scrolls it with the mouse wheel and joins the frames
-  into one tall image. A whole window works, VS Code included: a notification
-  or a status bar appears once, and a sidebar that does not move repeats down
-  the image (crop it in the editor) rather than risk painting over content
-  beside it. It stops at the
-  end of the page, after three minutes, or on Esc; the mouse stays yours
-  while it runs.
+You can also download `ScreenX-<version>-win-x64.zip` from
+[Releases](https://github.com/BrandonDoster/ScreenX/releases) and unzip it
+anywhere.
 
-The tray menu also has a capture on a 3 second delay, for photographing
-another program's open menu.
+ScreenX needs the .NET 10 Desktop Runtime. If it is missing, Windows offers
+to download it the first time ScreenX starts.
 
-By default a capture opens in the editor. **Copy** there puts it on the
-clipboard without saving anything; **Save** writes it to `Pictures\ScreenX`.
+To uninstall, turn off *Start with Windows* in Settings, quit ScreenX from
+the tray, and delete the install folder.
+
+## Capturing
+
+- **Region** (`Ctrl+Shift+Q`): hover to pick a window or monitor and click,
+  or drag a rectangle. Arrow keys nudge by a pixel (Shift for ten). Enter
+  takes the selection; Esc or right-click cancels.
+- **Scrolling capture**: pick an area as for a region, and ScreenX scrolls it
+  and joins the result into one tall image. Esc stops it early.
+- **Screen**: the whole monitor under the pointer, from a hotkey you set.
+
+The tray menu has all of these, plus a 3-second delayed capture (for open
+menus), *Edit last screenshot* and *Open screenshots folder*.
+
+A capture opens in the editor by default. Screenshots save to
+`Pictures\ScreenX`.
 
 ## Editor
 
 | Key | Tool |
 | --- | --- |
-| V | Select: drag to move, drag a handle to resize, Delete to remove, double-click text to edit |
+| V | Select, move, resize. Delete removes; double-click text to edit it |
 | A / R / E / L / P | Arrow, box, ellipse, line, pen |
 | H | Highlight |
-| T | Text: Enter places it, Shift+Enter for a new line |
+| T | Text. Enter places it, Shift+Enter adds a line |
 | N | Numbered step |
-| X | Redact: pixelates from the original capture, so it destroys the detail |
+| X | Redact (pixelates) |
 | C | Crop |
+| U | Cut out: drag across a strip, then Enter to remove it and close the gap |
 
-Ctrl+Z / Ctrl+Y undo and redo, Ctrl+C copies, Ctrl+S saves, Ctrl+wheel or
-Ctrl+plus/minus zooms, Ctrl+0 fits. Picking a colour or size with a shape
-selected changes that shape.
+`Ctrl+Z` / `Ctrl+Y` undo and redo, `Ctrl+C` copies, `Ctrl+S` saves,
+`Ctrl+wheel` zooms, `Ctrl+0` fits to the window.
 
-Saving a new capture gives it the usual name; saving again updates that same
-file. Saving an image that was opened from a file asks whether to overwrite it
-or save alongside it as `(edited)`. Closing with changes that were neither
-copied nor saved asks first.
-
-`ScreenX.exe --edit <file>` opens a PNG, JPEG, BMP or GIF in the editor.
+To open an existing image in the editor, run `ScreenX.exe --edit <file>` or
+use *Open with*.
 
 ## Settings
 
-**Settings...** in the tray menu, or start ScreenX again while it is running.
-Hotkeys are recorded by pressing them; Backspace clears one. `PrintScreen`,
-`Pause` and `F13`-`F24` may be used alone; anything else needs Control, Alt,
-Shift or Win. To use `PrintScreen`, first turn off *Settings > Accessibility >
-Keyboard > Use the Print screen key to open screen capture*.
+Open *Settings...* from the tray, or launch ScreenX again while it is
+running. Click a hotkey box and press the combination; Backspace clears it.
+To use `PrintScreen`, first turn off *Settings > Accessibility > Keyboard >
+Use the Print screen key to open screen capture* in Windows.
 
-Everything is kept in `%APPDATA%\ScreenX\screenx.json`, which can also be
-edited by hand. A file that does not parse is reported and left alone; it is
-written only when Save is pressed in the settings window.
+Settings live in `%APPDATA%\ScreenX\screenx.json`.
 
-```json
-{
-  "Folder": "C:\\Users\\you\\Pictures\\ScreenX",
-  "RegionHotkey": "Control+Shift+Q",
-  "ScreenHotkey": "",
-  "ScrollHotkey": "",
-  "AfterCapture": "editor"
-}
-```
-
-`AfterCapture` is `editor`, `both` (copy and save), `copy` or `save`.
-
-## Install
-
-ScreenX needs the .NET 10 Desktop Runtime (or newer). If it is missing, the
-first launch shows Windows' own dialog offering to download it; nothing has
-to be bundled.
-
-## Build
+## Building
 
 ```powershell
-dotnet build -c Release            # a few seconds
+dotnet build -c Release
 dotnet test tests\ScreenX.Tests -c Release
-dotnet publish -c Release          # ReadyToRun
 ```
 
-The tests cover what does not need a screen: hotkey parsing, settings
-loading and saving, the clipboard DIB layout, frames, dimming and rounded
-corners, shapes, redaction and undo history, and the scrolling-capture
-stitcher against synthetic pages (sticky headers and footers, sidebars and
-minimaps, notifications, moving scrollbar thumbs, text drawn at fractional
-offsets, repeating rows, blank space past the last line).
-
-Create `%TEMP%\screenx.log` to record capture timings, scrolling steps and
-errors; delete it to stop.
+Pushing a `v*` tag builds the release on GitHub Actions.
