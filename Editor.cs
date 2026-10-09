@@ -343,8 +343,14 @@ sealed class Editor : Form
     /// Back to the current step of history. `changes` is false when that only
     /// puts back what was already there, so closing afterwards does not ask
     /// about nothing.
-    void Restore(bool changes = true)
+    ///
+    /// False, with nothing changed, when the step's cut image could not be
+    /// made; the caller steps history back.
+    bool Restore(bool changes = true)
     {
+        var cutsChanged = history.Cuts != cuts;
+        // First, so a failure leaves shapes and crop matching the image.
+        if (!Recut(history.Cuts)) return false;
         var (restored, restoredCrop) = history.Current;
         shapes = restored;
         var cropChanged = crop != restoredCrop;
@@ -352,53 +358,63 @@ sealed class Editor : Form
         selected = null;
         if (pending != null) Uncut();
         if (changes) dirty = true;
-        var cutsChanged = history.Cuts != cuts;
-        Recut(history.Cuts);
         Rebuild();
         // A cut-out undone or redone keeps the zoom, as making it did; a crop
         // fits the window again, as making it did.
         if (cutsChanged) SetZoom(zoom);
         else if (cropChanged) SetZoom(Fit());
         UpdateBar();
+        return true;
     }
 
     void Undo()
     {
         CommitText();
-        if (history.Undo()) Restore();
+        if (history.Undo() && !Restore()) history.Redo();
     }
 
     void Redo()
     {
-        if (history.Redo()) Restore();
+        if (history.Redo() && !Restore()) history.Undo();
     }
 
     /// `source` made again from the capture when the cut-outs differ. Each
     /// step's array is its own and never changed, so the same array means the
     /// same cuts.
-    void Recut(Cut[] next)
+    ///
+    /// The cache goes first (Rebuild makes it again), but the current cut
+    /// stays until the new one exists: three full images at most, and a
+    /// capture too large to cut again leaves everything as it was.
+    bool Recut(Cut[] next)
     {
-        if (next == cuts) return;
-        // The old cut image and the cache go first, so this holds two full
-        // images at most, the capture and the new cut; Rebuild makes the
-        // cache again.
+        if (next == cuts) return true;
         cache?.Dispose();
         cache = null;
+        Bitmap made;
+        try
+        {
+            made = next.Length > 0 ? Cut.Apply(original, next) : original;
+        }
+        catch (Exception e) when (e is OutOfMemoryException or System.Runtime.InteropServices.ExternalException)
+        {
+            Rebuild();
+            status.Text = "Not enough memory to cut this image";
+            return false;
+        }
         if (source != original) source.Dispose();
-        // Consistent if Apply throws: the capture, uncut.
-        (source, cuts) = (original, []);
-        if (next.Length > 0) source = Cut.Apply(original, next);
-        cuts = next;
+        (source, cuts) = (made, next);
+        return true;
     }
 
     /// Takes the band out of the image and closes the gap, carrying shapes
-    /// and the crop across it.
+    /// and the crop across it. The image first: if it cannot be made, the
+    /// shapes and crop stay where they were.
     void CutOut(Cut cut)
     {
         pending = null;
+        if (!Recut([.. cuts, cut])) return;
         shapes = cut.Shift(shapes);
         crop = cut.Shift(crop);
-        Recut([.. cuts, cut]);
         Commit();
         SetZoom(zoom);
     }
@@ -408,6 +424,9 @@ sealed class Editor : Form
         if (cache?.Size != source.Size)
         {
             cache?.Dispose();
+            // Null until the new one exists, so a failure here leaves no
+            // disposed bitmap behind to be painted.
+            cache = null;
             cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
         }
         using (var g = Graphics.FromImage(cache))
@@ -765,7 +784,8 @@ sealed class Editor : Form
         // Only the part of the image that is inside the repaint is scaled, so
         // a zoomed-in full-screen capture costs what the window shows.
         var clip = Rectangle.Intersect(e.ClipRectangle, view);
-        if (!clip.IsEmpty)
+        // No cache only if making one ran out of memory; paint nothing then.
+        if (!clip.IsEmpty && cache != null)
         {
             var src = Rectangle.FromLTRB(
                 crop.X + (int)Math.Floor((clip.Left - origin.X) / zoom),
@@ -779,7 +799,7 @@ sealed class Editor : Form
             // a pre-scaled cache if fitting a huge capture ever feels slow.
             g.InterpolationMode = zoom < 1 ? InterpolationMode.HighQualityBilinear : InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(cache!, dest, src, GraphicsUnit.Pixel);
+            g.DrawImage(cache, dest, src, GraphicsUnit.Pixel);
         }
 
         g.SetClip(view);

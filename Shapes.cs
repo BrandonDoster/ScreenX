@@ -117,15 +117,24 @@ readonly record struct Cut(bool Columns, int At, int Length)
         var ys = Enumerable.Range(0, image.Height).ToList();
         foreach (var c in cuts) (c.Columns ? xs : ys).RemoveRange(c.At, c.Length);
         var cut = new Bitmap(xs.Count, ys.Count, image.PixelFormat);
-        using var g = Graphics.FromImage(cut);
-        // A straight copy: no blending, no resampling.
-        g.CompositingMode = CompositingMode.SourceCopy;
-        g.InterpolationMode = InterpolationMode.NearestNeighbor;
-        g.PixelOffsetMode = PixelOffsetMode.Half;
-        foreach (var (fromX, toX, w) in Runs(xs))
-        foreach (var (fromY, toY, h) in Runs(ys))
-            g.DrawImage(image, new Rectangle(toX, toY, w, h), new Rectangle(fromX, fromY, w, h), GraphicsUnit.Pixel);
-        return cut;
+        try
+        {
+            using var g = Graphics.FromImage(cut);
+            // A straight copy: no blending, no resampling.
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            foreach (var (fromX, toX, w) in Runs(xs))
+            foreach (var (fromY, toY, h) in Runs(ys))
+                g.DrawImage(image, new Rectangle(toX, toY, w, h), new Rectangle(fromX, fromY, w, h), GraphicsUnit.Pixel);
+            return cut;
+        }
+        catch
+        {
+            // A full-size image, not left for the finalizer.
+            cut.Dispose();
+            throw;
+        }
     }
 
     /// Each stretch of consecutive source indices: where it starts in the
