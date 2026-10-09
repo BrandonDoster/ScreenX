@@ -21,9 +21,9 @@ $p = Get-Process ScreenX; $c = $p.TotalProcessorTime; Start-Sleep 10; $p.Refresh
 $p.PrivateMemorySize64 / 1MB
 ```
 
-This branch (`windows`) is an orphan: it shares no history with `master`,
-which holds the earlier Rust/egui build for macOS and Windows. Nothing here
-should refer to Rust, egui, Tauri, `core/` or `app/`.
+This is a full rewrite; the earlier Rust/egui build is retired and its
+history is gone from the repository. Nothing here should refer to Rust, egui,
+Tauri, `core/` or `app/`.
 
 ## File map
 
@@ -106,8 +106,8 @@ should refer to Rust, egui, Tauri, `core/` or `app/`.
 10. **Settings are written only from the settings window's Save.**
     `screenx.json` is created once with the defaults; a file that fails to
     parse gives an error and the defaults for that run, and is left as it
-    was. It is not `settings.json`, which the Rust build owns in the same
-    folder and rewrites whole.
+    was. It is not `settings.json`, which the retired Rust build rewrote whole
+    in the same folder; machines that ran it still have one there.
 
 10a. **The settings window is modeless.** `DialogResult` closes only modal
      forms; it calls `Close()`. Hotkeys are unregistered while it is open, or
