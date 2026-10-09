@@ -100,9 +100,17 @@ static class Images
     /// file-backed image's file locked, and Save could not overwrite it.
     public static Bitmap Open(string path)
     {
-        var info = new FileInfo(path);
-        if (info.Length > MaxFileBytes) throw new InvalidDataException($"larger than {MaxFileBytes / (1 << 20)} MB");
-        var bytes = File.ReadAllBytes(path);
+        // The size from the open handle, and exactly that much read: checked by
+        // name first, a file that grew in between got past the limit.
+        byte[] bytes;
+        using (var file = File.OpenRead(path))
+        {
+            // A pipe or a device has no length, and Length would throw.
+            if (!file.CanSeek) throw new InvalidDataException("not a file");
+            if (file.Length > MaxFileBytes) throw new InvalidDataException($"larger than {MaxFileBytes / (1 << 20)} MB");
+            bytes = new byte[file.Length];
+            file.ReadExactly(bytes);
+        }
         if (!IsSupported(bytes)) throw new InvalidDataException("not a PNG, JPEG, BMP or GIF image");
         using var stream = new MemoryStream(bytes, writable: false);
         using var decoded = new Bitmap(stream);
