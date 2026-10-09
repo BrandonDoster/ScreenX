@@ -1,5 +1,38 @@
 # Questions for Brandon
 
+## Round 5 (2026-10-08 afternoon)
+
+Your answers to the review-notes questions, and where each stands. None of
+it is committed: you said no commits yet.
+
+| Item | Your answer | Done |
+| --- | --- | --- |
+| Network folder | Warn, don't block | Save shows a warning once for a share, WebDAV path or mapped network drive; Save again keeps it |
+| Sticky-panel repeats | Fix it | Done, and live-tested in Notepad, Edge (sticky header, and a page with a highlighting contents panel) and VS Code (text area and whole window, long and short files) |
+| Mixed DPI | Change the scale | Done with the main display at 125%; the 12.3" panel only allows 100%. Both are back at 100% |
+| `Local\ScreenX` name | Leave it | Left |
+| Comma in folder | (asked whether it is real) | It is: a folder `a,b` opened Documents and `end,` opened This PC. Commas are legal in folder names ("Smith, John"), so nothing is refused; the path is now always quoted, which opens the right folder in every case tried |
+| `dotnet ScreenX.dll` | Leave it | Left |
+| Whole-width "end" | Do with the sidebar fix | Done |
+
+Questions:
+
+12. **Your 12.3" display dropped off during the DPI test.** It read black in
+    screenshots from the start, and Windows now lists it as not present. Its
+    scale is back at 100%. Is it switched off or asleep? If it is still gone
+    after you power-cycle it, tell me.
+12A.
+
+13. **Commit.** Everything from this round is uncommitted on `windows`. One
+    commit, or one per item? Say when.
+13A.
+
+14. **Per-column sidebars.** The last review left one medium: where a
+    48 px strip straddles a pane edge, repeated list cells beside the pane
+    can still be painted over. The fix is to decide "sidebar" per column
+    instead of per strip; about 30 lines plus a full live rerun. Do it next?
+14A.
+
 ## Where your answers stand (2026-10-08)
 
 | # | Your answer | Done |
