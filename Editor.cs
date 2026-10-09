@@ -436,11 +436,10 @@ sealed class Editor : Form
     }
 
     /// Does not throw for running out of memory or a GDI+ failure (anything
-    /// else is a bug and is left to surface): after a cut changes the size
-    /// it makes a new cache, and
-    /// drawing can need memory too (redaction locks the pixels it reads).
-    /// Running out must not escape a click or a key, or history and the
-    /// image fall out of step. The cache is then left null (paint shows
+    /// else is a bug and is left to surface). After a cut changes the size it
+    /// makes a new cache, and drawing can need memory too (redaction locks
+    /// the pixels it reads). Running out must not escape a click or a key, or
+    /// history and the image fall out of step. The cache is then left null (paint shows
     /// nothing, Export reports it) and the next Rebuild tries again.
     void Rebuild()
     {
