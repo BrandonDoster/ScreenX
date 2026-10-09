@@ -29,6 +29,7 @@ static class Program
         // Follow the Windows light or dark setting, so the editor and the tray
         // menu match everything else on the desktop.
         Application.SetColorMode(SystemColorMode.System);
+        Application.ThreadException += Failed;
         // The settings window's folder picker, run apart so the shell
         // extensions it loads leave with it. See SettingsWindow.Browse.
         if (args is ["--pick-folder", var start]) return SettingsWindow.PickFolder(start);
@@ -80,6 +81,22 @@ static class Program
             Application.Run(new Tray(reopen));
         }
         return 0;
+    }
+
+    /// An exception out of a click, a key or a paint. Out of memory with an
+    /// editor open saves its screenshot and closes it (Editor.Rescue): one
+    /// rule instead of a guard at every allocation, for a footprint that
+    /// should never get there. Anything else as WinForms shows it without a
+    /// handler.
+    static void Failed(object? sender, ThreadExceptionEventArgs e)
+    {
+        if (e.Exception is OutOfMemoryException && Application.OpenForms.OfType<Editor>().ToList() is [_, ..] editors)
+        {
+            foreach (var editor in editors) editor.Rescue();
+            return;
+        }
+        using var dialog = new ThreadExceptionDialog(e.Exception);
+        if (dialog.ShowDialog() == DialogResult.Abort) Application.Exit();
     }
 
     [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int process);

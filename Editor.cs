@@ -333,40 +333,23 @@ sealed class Editor : Form
     // History. A snapshot is the shape list and the crop, never pixels, so it
     // costs a few hundred bytes however large the capture is.
 
-    /// Rebuilt before the push: the push copies every shape, and if that
-    /// copy runs out of memory the canvas still matches the editor; only the
-    /// undo step is missing.
     void Commit()
     {
+        history.Push(shapes, crop, cuts);
         dirty = true;
         status.Text = "";
         Rebuild();
-        history.Push(shapes, crop, cuts);
         UpdateBar();
     }
 
     /// Back to the current step of history. `changes` is false when that only
     /// puts back what was already there, so closing afterwards does not ask
     /// about nothing.
-    ///
-    /// False, with nothing changed, when the step's cut image could not be
-    /// made; the caller steps history back.
-    bool Restore(bool changes = true)
+    void Restore(bool changes = true)
     {
         var cutsChanged = history.Cuts != cuts;
-        // Every copy before anything changes, so running out of memory
-        // part way leaves the editor as it was: the shapes, then the image.
-        List<Shape> restored;
-        Rectangle restoredCrop;
-        try
-        {
-            (restored, restoredCrop) = history.Current;
-        }
-        catch (OutOfMemoryException)
-        {
-            return false;
-        }
-        if (!Recut(history.Cuts)) return false;
+        Recut(history.Cuts);
+        var (restored, restoredCrop) = history.Current;
         shapes = restored;
         var cropChanged = crop != restoredCrop;
         crop = restoredCrop;
@@ -379,95 +362,63 @@ sealed class Editor : Form
         if (cutsChanged) SetZoom(zoom);
         else if (cropChanged) SetZoom(Fit());
         UpdateBar();
-        return true;
     }
 
     void Undo()
     {
         CommitText();
-        if (history.Undo() && !Restore()) history.Redo();
+        if (history.Undo()) Restore();
     }
 
     void Redo()
     {
-        if (history.Redo() && !Restore()) history.Undo();
+        if (history.Redo()) Restore();
     }
 
     /// `source` made again from the capture when the cut-outs differ. Each
     /// step's array is its own and never changed, so the same array means the
     /// same cuts.
     ///
-    /// The cache goes first (Rebuild makes it again), but the current cut
-    /// stays until the new one exists: three full images at most, and a
-    /// capture too large to cut again leaves everything as it was.
-    bool Recut(Cut[] next)
+    /// The cache goes first (Rebuild makes it again), and the current cut
+    /// once the new one exists: three full images at most. Running out of
+    /// memory is not handled here; see Program.OutOfMemory.
+    void Recut(Cut[] next)
     {
-        if (next == cuts) return true;
+        if (next == cuts) return;
         cache?.Dispose();
         cache = null;
-        Bitmap made;
-        try
-        {
-            made = next.Length > 0 ? Cut.Apply(original, next) : original;
-        }
-        catch (Exception e) when (e is OutOfMemoryException or System.Runtime.InteropServices.ExternalException)
-        {
-            Rebuild();
-            status.Text = "Not enough memory to cut this image";
-            return false;
-        }
+        var made = next.Length > 0 ? Cut.Apply(original, next) : original;
         if (source != original) source.Dispose();
         (source, cuts) = (made, next);
-        return true;
     }
 
     /// Takes the band out of the image and closes the gap, carrying shapes
-    /// and the crop across it. Shapes are copied first and the image made
-    /// second, so if either runs out of memory nothing has moved.
+    /// and the crop across it.
     void CutOut(Cut cut)
     {
         pending = null;
-        var shifted = cut.Shift(shapes);
-        if (!Recut([.. cuts, cut])) return;
-        shapes = shifted;
+        Recut([.. cuts, cut]);
+        shapes = cut.Shift(shapes);
         crop = cut.Shift(crop);
         Commit();
         SetZoom(zoom);
     }
 
-    /// Does not throw for running out of memory or a GDI+ failure (anything
-    /// else is a bug and is left to surface). After a cut changes the size it
-    /// makes a new cache, and drawing can need memory too (redaction locks
-    /// the pixels it reads). Running out must not escape a click or a key, or
-    /// history and the image fall out of step. The cache is then left null (paint shows
-    /// nothing, Export reports it) and the next Rebuild tries again.
     void Rebuild()
     {
-        try
+        if (cache?.Size != source.Size)
         {
-            if (cache?.Size != source.Size)
-            {
-                cache?.Dispose();
-                // Null until the new one exists, so a failure here leaves no
-                // disposed bitmap behind to be painted.
-                cache = null;
-                cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
-            }
-            using var g = Graphics.FromImage(cache);
+            cache?.Dispose();
+            cache = null;
+            cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
+        }
+        using (var g = Graphics.FromImage(cache))
+        {
             g.CompositingMode = CompositingMode.SourceCopy;
             g.DrawImageUnscaled(source, 0, 0);
             g.CompositingMode = CompositingMode.SourceOver;
             foreach (var shape in shapes)
                 if (shape != live) shape.Draw(g, source);
-        }
-        catch (Exception e) when (e is OutOfMemoryException or ArgumentException or System.Runtime.InteropServices.ExternalException)
-        {
-            // ArgumentException is how GDI+ refuses a bitmap too large to
-            // allocate. A half-drawn cache would show and export wrong, so
-            // it goes too.
-            cache?.Dispose();
-            cache = null;
-            status.Text = "Not enough memory to show this image";
         }
         canvas.Invalidate();
     }
@@ -521,13 +472,6 @@ sealed class Editor : Form
         if (e.Button != MouseButtons.Left) return;
         CommitText();
         canvas.Focus();
-        if (cache == null)
-        {
-            // The canvas ran out of memory and says to click: try again, and
-            // do nothing else with this click.
-            Rebuild();
-            return;
-        }
         var p = ToImage(e.Location);
         switch (tool)
         {
@@ -823,14 +767,9 @@ sealed class Editor : Form
         // Only the part of the image that is inside the repaint is scaled, so
         // a zoomed-in full-screen capture costs what the window shows.
         var clip = Rectangle.Intersect(e.ClipRectangle, view);
-        // No cache only if making one ran out of memory. Not retried here: a
-        // retry that fails invalidates, which would repaint forever.
-        if (cache == null)
-            // The visible canvas, not the image's area: zoomed or scrolled,
-            // the middle of that can be off screen.
-            TextRenderer.DrawText(g, "Not enough memory to show this image. Click to try again.", Font, canvas.ClientRectangle, Ink,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
-        else if (!clip.IsEmpty)
+        // No cache only after running out of memory, while the warning that
+        // closes this editor is up and still lets it repaint.
+        if (!clip.IsEmpty && cache != null)
         {
             var src = Rectangle.FromLTRB(
                 crop.X + (int)Math.Floor((clip.Left - origin.X) / zoom),
@@ -943,7 +882,7 @@ sealed class Editor : Form
         selected = null;
         live = null;
         Rebuild();
-        return cache?.Clone(crop, PixelFormat.Format32bppArgb) ?? throw new OutOfMemoryException("Not enough memory for this image");
+        return cache!.Clone(crop, PixelFormat.Format32bppArgb);
     }
 
     void Copy()
@@ -999,17 +938,54 @@ sealed class Editor : Form
             dirty = false;
             status.Text = $"Saved {Path.GetFileName(target)}";
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OutOfMemoryException or System.Runtime.InteropServices.ExternalException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException)
         {
             status.Text = e.Message;
         }
     }
 
+    string NewName() => Tray.UniquePath(folder, $"ScreenX_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}");
+
+    string Beside(string file) => Tray.UniquePath(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file) + " (edited)",
+        Path.GetExtension(file));
+
+    /// Out of memory with this editor open (see Program.Failed). Rather than
+    /// guard every allocation, the screenshot goes to disk without asking,
+    /// a warning says where, and the editor closes once it is accepted. A
+    /// file it was opened from is never overwritten here.
+    public void Rescue()
+    {
+        string said;
+        try
+        {
+            var target = savedTo ?? (path == null ? NewName() : Beside(path));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            try
+            {
+                using var image = Export();
+                image.Save(target, FormatFor(target));
+            }
+            catch (OutOfMemoryException)
+            {
+                // No memory left to draw the edits: the capture as it arrived.
+                original.Save(target, FormatFor(target));
+            }
+            said = $"ScreenX ran out of memory. The screenshot was saved as {target}.";
+        }
+        catch (Exception e) when (e is OutOfMemoryException or IOException or UnauthorizedAccessException
+            or System.Runtime.InteropServices.ExternalException)
+        {
+            said = $"ScreenX ran out of memory and could not save the screenshot: {e.Message}";
+        }
+        MessageBox.Show(this, said + "\n\nThis editor will now close.", "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        dirty = false;
+        Close();
+    }
+
     string? Target()
     {
-        if (path == null) return Tray.UniquePath(folder, $"ScreenX_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}");
-        var beside = Tray.UniquePath(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + " (edited)",
-            Path.GetExtension(path));
+        if (path == null) return NewName();
+        var beside = Beside(path);
         var overwrite = new TaskDialogCommandLinkButton($"Overwrite {Path.GetFileName(path)}", "Replace the file with this edited version.");
         var alongside = new TaskDialogCommandLinkButton($"Save alongside as {Path.GetFileName(beside)}", "Keep the original as it is.");
         var page = new TaskDialogPage
