@@ -314,7 +314,8 @@ public class ImageTests
         File.WriteAllBytes(path, [0x01, 0, 0, 0, 0, 0, 0, 0]);
         try
         {
-            Assert.Throws<InvalidDataException>(() => Images.Open(path));
+            var e = Assert.Throws<InvalidDataException>(() => Images.Open(path));
+            Assert.True(Images.IsLoadFailure(e)); // shown as a message, not a crash
         }
         finally
         {

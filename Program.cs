@@ -122,9 +122,10 @@ static class Images
         || head.StartsWith("BM"u8)
         || head.StartsWith("GIF8"u8);
 
-    /// GDI+ reports a corrupt image as OutOfMemoryException.
+    /// GDI+ reports a corrupt image as OutOfMemoryException. Open's own
+    /// refusals are InvalidDataException, which is not an IOException.
     public static bool IsLoadFailure(Exception e) =>
-        e is IOException or UnauthorizedAccessException or ArgumentException or OutOfMemoryException
+        e is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or OutOfMemoryException
             or System.Runtime.InteropServices.ExternalException;
 }
 
