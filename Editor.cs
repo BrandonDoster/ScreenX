@@ -379,27 +379,16 @@ sealed class Editor : Form
     void Recut(Cut[] next)
     {
         if (next == cuts) return;
-        // Both old images go first, so this never holds more than the
-        // capture and two cut images; Rebuild makes the cache again.
-        DropImages();
-        var made = original;
-        foreach (var cut in next)
-        {
-            var smaller = cut.Apply(made);
-            if (made != original) made.Dispose();
-            made = smaller;
-        }
-        source = made;
-        cuts = next;
-    }
-
-    /// The cut image and the cache, given back before a new size is made.
-    void DropImages()
-    {
+        // The old cut image and the cache go first, so this holds two full
+        // images at most, the capture and the new cut; Rebuild makes the
+        // cache again.
         cache?.Dispose();
         cache = null;
         if (source != original) source.Dispose();
-        source = original;
+        // Consistent if Apply throws: the capture, uncut.
+        (source, cuts) = (original, []);
+        if (next.Length > 0) source = Cut.Apply(original, next);
+        cuts = next;
     }
 
     /// Takes the band out of the image and closes the gap, carrying shapes
@@ -409,15 +398,7 @@ sealed class Editor : Form
         pending = null;
         shapes = cut.Shift(shapes);
         crop = cut.Shift(crop);
-        // From the current image, not from the capture through every cut.
-        // The cache goes first, so this holds three full images at most: the
-        // capture, the current cut and the new one.
-        cache?.Dispose();
-        cache = null;
-        var smaller = cut.Apply(source);
-        DropImages();
-        source = smaller;
-        cuts = [.. cuts, cut];
+        Recut([.. cuts, cut]);
         Commit();
         SetZoom(zoom);
     }

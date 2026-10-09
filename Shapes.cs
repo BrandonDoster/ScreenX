@@ -106,26 +106,36 @@ readonly record struct Cut(bool Columns, int At, int Length)
         return kept;
     }
 
-    /// A new bitmap without the band; `image` is left as it was.
-    public Bitmap Apply(Bitmap image)
+    /// A new bitmap with `cuts` taken out in order; `image` is left as it was.
+    /// One copy however many cuts: the columns and rows that survive them all
+    /// are worked out first, then copied across in unbroken runs.
+    public static Bitmap Apply(Bitmap image, IReadOnlyList<Cut> cuts)
     {
-        var size = Columns ? new Size(image.Width - Length, image.Height) : new Size(image.Width, image.Height - Length);
-        var cut = new Bitmap(size.Width, size.Height, image.PixelFormat);
+        var xs = Enumerable.Range(0, image.Width).ToList();
+        var ys = Enumerable.Range(0, image.Height).ToList();
+        foreach (var c in cuts) (c.Columns ? xs : ys).RemoveRange(c.At, c.Length);
+        var cut = new Bitmap(xs.Count, ys.Count, image.PixelFormat);
         using var g = Graphics.FromImage(cut);
         // A straight copy: no blending, no resampling.
         g.CompositingMode = CompositingMode.SourceCopy;
         g.InterpolationMode = InterpolationMode.NearestNeighbor;
         g.PixelOffsetMode = PixelOffsetMode.Half;
-        var before = Columns ? new Rectangle(0, 0, At, size.Height) : new Rectangle(0, 0, size.Width, At);
-        var after = Columns
-            ? new Rectangle(At, 0, size.Width - At, size.Height)
-            : new Rectangle(0, At, size.Width, size.Height - At);
-        var from = after;
-        from.Offset(Columns ? Length : 0, Columns ? 0 : Length);
-        // Either side can be empty when the band reaches an edge.
-        if (At > 0) g.DrawImage(image, before, before, GraphicsUnit.Pixel);
-        if (after.Width > 0 && after.Height > 0) g.DrawImage(image, after, from, GraphicsUnit.Pixel);
+        foreach (var (fromX, toX, w) in Runs(xs))
+        foreach (var (fromY, toY, h) in Runs(ys))
+            g.DrawImage(image, new Rectangle(toX, toY, w, h), new Rectangle(fromX, fromY, w, h), GraphicsUnit.Pixel);
         return cut;
+    }
+
+    /// Each stretch of consecutive source indices: where it starts in the
+    /// source, where it lands, and how long it is.
+    static IEnumerable<(int from, int to, int length)> Runs(List<int> kept)
+    {
+        for (var i = 0; i < kept.Count;)
+        {
+            var start = i;
+            while (++i < kept.Count && kept[i] == kept[i - 1] + 1) { }
+            yield return (kept[start], start, i - start);
+        }
     }
 }
 

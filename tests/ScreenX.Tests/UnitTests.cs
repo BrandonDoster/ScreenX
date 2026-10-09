@@ -479,13 +479,41 @@ public class CutTests
         for (var y = 0; y < 5; y++)
         for (var x = 0; x < 7; x++)
             image.SetPixel(x, y, At(x, y));
-        using var cut = new Cut(columns, at, length).Apply(image);
+        using var cut = Cut.Apply(image, [new Cut(columns, at, length)]);
         Assert.Equal(columns ? new Size(7 - length, 5) : new Size(7, 5 - length), cut.Size);
         for (var y = 0; y < cut.Height; y++)
         for (var x = 0; x < cut.Width; x++)
         {
             var (fx, fy) = columns ? (x < at ? x : x + length, y) : (x, y < at ? y : y + length);
             Assert.Equal(At(fx, fy).ToArgb(), cut.GetPixel(x, y).ToArgb());
+        }
+    }
+
+    /// Undo rebuilds from the capture through every cut in one copy; that
+    /// must match making the cuts one after another.
+    [Fact]
+    public void Several_cuts_in_one_pass_match_cutting_one_at_a_time()
+    {
+        using var image = new Bitmap(9, 8, PixelFormat.Format32bppPArgb);
+        for (var y = 0; y < 8; y++)
+        for (var x = 0; x < 9; x++)
+            image.SetPixel(x, y, Color.FromArgb(255, x * 25, y * 30, 9));
+        Cut[] cuts = [new(true, 2, 2), new(false, 1, 3), new(true, 4, 1), new(true, 0, 1), new(false, 3, 1)];
+        using var once = Cut.Apply(image, cuts);
+        var step = image;
+        foreach (var c in cuts)
+        {
+            var next = Cut.Apply(step, [c]);
+            if (step != image) step.Dispose();
+            step = next;
+        }
+        using (step)
+        {
+            Assert.Equal(new Size(5, 4), once.Size);
+            Assert.Equal(step.Size, once.Size);
+            for (var y = 0; y < once.Height; y++)
+            for (var x = 0; x < once.Width; x++)
+                Assert.Equal(step.GetPixel(x, y).ToArgb(), once.GetPixel(x, y).ToArgb());
         }
     }
 
