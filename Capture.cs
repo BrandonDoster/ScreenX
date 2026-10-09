@@ -79,7 +79,7 @@ static class Capture
             rect.Offset(-area.X, -area.Y);
             // A window cut off by the edge of the screen has square corners
             // where it is cut; only a whole one is rounded.
-            found.Add(new WindowArea(rect, rect.Size == whole.Size ? CornerRadius(hwnd, whole) : 0));
+            found.Add(new WindowArea(rect, rect.Size == whole.Size ? CornerRadius(hwnd) : 0));
             return true;
         }, IntPtr.Zero);
         return found;
@@ -94,15 +94,14 @@ static class Capture
     /// except maximised or snapped to the side of the screen, and nothing is
     /// rounded in a remote session. A window that opted out of rounding still
     /// gets corners; see REVIEW-NOTES.md.
-    static int CornerRadius(IntPtr hwnd, Rectangle bounds)
+    static int CornerRadius(IntPtr hwnd)
     {
         if (Environment.OSVersion.Version.Build < 22000 || IsZoomed(hwnd) || SystemInformation.TerminalServerSession) return 0;
         const int WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
         if ((GetWindowLong(hwnd, GWL_STYLE) & (WS_CAPTION | WS_THICKFRAME)) == 0) return 0;
-        // Snapped: it fills the work area top to bottom, or side to side.
-        var work = Screen.FromRectangle(bounds).WorkingArea;
-        if ((bounds.Top <= work.Top && bounds.Bottom >= work.Bottom) || (bounds.Left <= work.Left && bounds.Right >= work.Right))
-            return 0;
+        // Snapped, by Windows' own account: guessing from the work area took a
+        // window taller than the screen for snapped and missed quarter snaps.
+        if (IsWindowArranged(hwnd)) return 0;
         return (int)Math.Round(8 * GetDpiForWindow(hwnd) / 96.0);
     }
 
@@ -168,6 +167,7 @@ static class Capture
     const int GWL_STYLE = -16, GWL_EXSTYLE = -20, WS_EX_TRANSPARENT = 0x20;
 
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsWindowArranged(IntPtr hwnd);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
 
     [StructLayout(LayoutKind.Sequential)]
