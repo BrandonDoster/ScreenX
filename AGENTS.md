@@ -6,7 +6,9 @@ is for users.
 ## Orientation
 
 ScreenX is a Windows 11 screenshot tool: C# on .NET 10, WinForms, one
-resident process. There is no network code anywhere, and none may be added.
+resident process. There is no network code in the app, and none may be
+added; `installer.ps1`, which downloads releases from GitHub, is the only
+exception.
 
 The design goal is that it is unnoticeable until it is needed: **0 CPU at
 idle** (no timers, no polling, workstation GC with no background thread) and
@@ -37,6 +39,8 @@ should refer to Rust, egui, Tauri, `core/` or `app/`.
 | `SettingsWindow.cs` | Settings window, hotkey recording, `--pick-folder` |
 | `Shapes.cs` | `Shape`: geometry, hit testing, handles, drawing, redaction; `History` (undo) |
 | `tests/ScreenX.Tests` | xunit tests for everything that needs no screen |
+| `installer.ps1` | Installs or updates from the latest release; Windows PowerShell 5.1, ASCII only |
+| `.github/workflows/build.yml` | Tests and publishes every push; a `v*` tag makes the release |
 
 ## Rules — each one was a real bug
 
@@ -136,6 +140,10 @@ dotnet build -c Release                     # a few seconds
 dotnet test tests\ScreenX.Tests -c Release
 dotnet publish -c Release                   # ReadyToRun; needs the .NET 10 Desktop Runtime
 ```
+
+To release, push a tag: `git tag v2.0.1; git push origin v2.0.1`. The tag
+sets the version (the csproj's is for local builds), and the release gets
+`ScreenX-2.0.1-win-x64.zip` and `installer.ps1`.
 
 Stop the running copy before building, or the copy step fails on a locked
 `ScreenX.exe`. Create `%TEMP%\screenx.log` to log capture timings, scrolling

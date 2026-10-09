@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # gh release create
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - run: dotnet test tests\ScreenX.Tests -c Release
+
+      # A tag v2.0.1 builds version 2.0.1, which installer.ps1 compares against
+      # the installed exe. No .pdb in the package; users never need it.
+      - run: |
+          $props = @('-p:DebugType=none')
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $props += "-p:Version=$([version]$env:GITHUB_REF_NAME.TrimStart('v'))" }
+          dotnet publish ScreenX.csproj -c Release -o out @props
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenX-win-x64
+          path: out
+
+      - if: github.ref_type == 'tag'
+        run: |
+          $zip = "ScreenX-$($env:GITHUB_REF_NAME.TrimStart('v'))-win-x64.zip"
+          Compress-Archive out\* $zip
+          gh release create $env:GITHUB_REF_NAME $zip installer.ps1 --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
