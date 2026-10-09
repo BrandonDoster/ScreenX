@@ -73,7 +73,10 @@ static class Scrolling
                 if (clock.Elapsed > MaxTime) { ended = "it reached the time limit"; break; }
                 // Moving the pointer while the user holds a button would drag
                 // whatever they are holding to the area and back, so wait.
-                while (ButtonDown() && clock.Elapsed < MaxTime && !Escape()) await Task.Delay(50);
+                // Escape() consumes the tap, so the loop's own reading is kept.
+                var escaped = false;
+                while (ButtonDown() && clock.Elapsed < MaxTime && !(escaped = Escape())) await Task.Delay(50);
+                if (escaped) { ended = "stopped"; break; }
                 if (!Wheel(-notches, aim))
                 {
                     ended = "Windows refused the scroll (the window may be running as administrator)";
