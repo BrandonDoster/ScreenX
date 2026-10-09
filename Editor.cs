@@ -622,7 +622,7 @@ sealed class Editor : Form
             // Shown and confirmed rather than cut at once: what goes is easy
             // to misjudge while dragging.
             pending = Cut.Across(done.Points[0], done.Points[1], crop);
-            status.Text = pending != null ? "Enter or click the band to cut it out, Esc to keep it" : "";
+            if (pending != null) status.Text = CutHint;
             canvas.Invalidate();
             return;
         }
@@ -898,10 +898,14 @@ sealed class Editor : Form
         }
     }
 
+    const string CutHint = "Enter or click the band to cut it out, Esc to keep it";
+
+    /// Drops the waiting band and its hint, and only its hint: "Copied" or a
+    /// save error shown meanwhile stays.
     void Uncut()
     {
         pending = null;
-        status.Text = "";
+        if (status.Text == CutHint) status.Text = "";
         canvas.Invalidate();
     }
 
@@ -938,7 +942,8 @@ sealed class Editor : Form
             dirty = false;
             status.Text = "Copied";
         }
-        catch (Exception e) when (e is InvalidOperationException or OutOfMemoryException)
+        // ExternalException: GDI+ failing to clone or encode, as Save catches.
+        catch (Exception e) when (e is InvalidOperationException or OutOfMemoryException or System.Runtime.InteropServices.ExternalException)
         {
             status.Text = e.Message;
         }
