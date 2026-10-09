@@ -421,6 +421,10 @@ sealed class Editor : Form
         SetZoom(zoom);
     }
 
+    /// Never throws: after a cut changes the size it makes a new cache, and
+    /// running out of memory for it must not escape a click or a key. The
+    /// cache is then left null (paint shows nothing, Export reports it) and
+    /// the next Rebuild tries again.
     void Rebuild()
     {
         if (cache?.Size != source.Size)
@@ -429,7 +433,18 @@ sealed class Editor : Form
             // Null until the new one exists, so a failure here leaves no
             // disposed bitmap behind to be painted.
             cache = null;
-            cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
+            try
+            {
+                cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
+            }
+            catch (Exception e) when (e is OutOfMemoryException or ArgumentException or System.Runtime.InteropServices.ExternalException)
+            {
+                // ArgumentException is how GDI+ refuses a bitmap too large
+                // to allocate.
+                status.Text = "Not enough memory to show this image";
+                canvas.Invalidate();
+                return;
+            }
         }
         using (var g = Graphics.FromImage(cache))
         {
@@ -896,7 +911,7 @@ sealed class Editor : Form
         selected = null;
         live = null;
         Rebuild();
-        return cache!.Clone(crop, PixelFormat.Format32bppArgb);
+        return cache?.Clone(crop, PixelFormat.Format32bppArgb) ?? throw new OutOfMemoryException("Not enough memory for this image");
     }
 
     void Copy()
@@ -951,7 +966,7 @@ sealed class Editor : Form
             dirty = false;
             status.Text = $"Saved {Path.GetFileName(target)}";
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OutOfMemoryException or System.Runtime.InteropServices.ExternalException)
         {
             status.Text = e.Message;
         }
