@@ -496,6 +496,17 @@ public class SettingsWindowTests
 
     [Fact]
     public void Empty_hotkeys_are_allowed() => Assert.Null(SettingsWindow.Validate(With(region: "")));
+
+    [Theory]
+    [InlineData(@"\\nas\shots", true)]
+    [InlineData(@"\\nas@SSL\DavWWWRoot\shots", true)]
+    [InlineData(@"\\?\UNC\nas\shots", true)]
+    [InlineData(@"\\.\UNC\nas\shots", true)]
+    [InlineData("//nas/shots", true)]
+    [InlineData(@"C:\Shots", false)]
+    [InlineData(@"\\?\C:\Shots", false)]
+    public void Network_folders_are_recognised(string folder, bool network) =>
+        Assert.Equal(network, SettingsWindow.OnNetwork(folder));
 }
 
 public class AfterCaptureTests

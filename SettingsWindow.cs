@@ -127,6 +127,14 @@ sealed class SettingsWindow : Form
             problem.Text = error;
             return;
         }
+        // Allowed (a NAS may be the point), but said once: ScreenX itself has
+        // no network code, and a capture saved there leaves the machine.
+        if (OnNetwork(chosen.Folder) && !chosen.Folder.Equals(original.Folder, StringComparison.OrdinalIgnoreCase) && !string.Equals(warned, chosen.Folder, StringComparison.OrdinalIgnoreCase))
+        {
+            warned = chosen.Folder;
+            problem.Text = "That folder is on the network: every capture saved will be sent there, and Windows signs in to it as you. Press Save again to use it.";
+            return;
+        }
         try
         {
             Settings.Save(chosen);
@@ -154,6 +162,22 @@ sealed class SettingsWindow : Form
         if (used != null) return $"{string.Join(" and ", used.Select(k => k.Item2))} have the same hotkey.";
         if (!Path.IsPathFullyQualified(s.Folder)) return "The screenshots folder must be a full path, such as C:\\Users\\you\\Pictures\\ScreenX.";
         return null;
+    }
+
+    string? warned;
+
+    /// A share (\\host\share, WebDAV's \\host@SSL\...) or a mapped network drive.
+    internal static bool OnNetwork(string folder)
+    {
+        folder = folder.Replace('/', '\\');
+        if (folder.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)
+            || folder.StartsWith(@"\\.\UNC\", StringComparison.OrdinalIgnoreCase)) return true;
+        if (folder.StartsWith(@"\\?\") || folder.StartsWith(@"\\.\")) folder = folder[4..];
+        if (folder.StartsWith(@"\\")) return true;
+        var root = Path.GetPathRoot(folder);
+        if (string.IsNullOrEmpty(root)) return false;
+        try { return new DriveInfo(root).DriveType == DriveType.Network; }
+        catch (ArgumentException) { return false; }
     }
 
     /// The same combination written differently ("ctrl+shift+q", "Shift+Control+Q").
