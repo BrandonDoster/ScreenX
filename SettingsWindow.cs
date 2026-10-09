@@ -221,15 +221,7 @@ sealed class SettingsWindow : Form
         Enabled = false;
         try
         {
-            var start = new ProcessStartInfo(Environment.ProcessPath!)
-            {
-                ArgumentList = { "--pick-folder", folder.Text },
-                RedirectStandardOutput = true,
-                // Both ends agree on UTF-8, or a folder name outside ASCII comes back garbled.
-                StandardOutputEncoding = System.Text.Encoding.UTF8,
-                UseShellExecute = false,
-            };
-            using var picker = Process.Start(start);
+            using var picker = Process.Start(Picker(folder.Text));
             if (picker == null) return;
             var chosen = (await picker.StandardOutput.ReadToEndAsync()).Trim();
             await picker.WaitForExitAsync();
@@ -243,6 +235,45 @@ sealed class SettingsWindow : Form
         {
             Enabled = true;
             Activate();
+        }
+    }
+
+    static ProcessStartInfo Picker(string start) => new(Environment.ProcessPath!)
+    {
+        ArgumentList = { "--pick-folder", start },
+        RedirectStandardOutput = true,
+        // Both ends agree on UTF-8, or a folder name outside ASCII comes back garbled.
+        StandardOutputEncoding = System.Text.Encoding.UTF8,
+        UseShellExecute = false,
+    };
+
+    /// The picker child, waited for: the folder chosen, or null if it was
+    /// cancelled or could not start. For the editor's out-of-memory rescue,
+    /// where a separate process is also what has memory to spare.
+    ///
+    /// Messages keep being handled while it waits, with `owner` disabled so
+    /// it takes no clicks meanwhile. Blocked outright, this process stopped
+    /// answering, and the picker's dialog did not appear until it was ended.
+    public static string? Pick(string start, Control owner)
+    {
+        owner.Enabled = false;
+        try
+        {
+            using var picker = Process.Start(Picker(start));
+            if (picker == null) return null;
+            var read = picker.StandardOutput.ReadToEndAsync();
+            while (!read.Wait(50)) Application.DoEvents();
+            picker.WaitForExit();
+            var chosen = read.Result.Trim();
+            return chosen.Length > 0 ? chosen : null;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or IOException)
+        {
+            return null;
+        }
+        finally
+        {
+            owner.Enabled = true;
         }
     }
 

@@ -956,9 +956,12 @@ sealed class Editor : Form
 
     /// Out of memory with this editor open (see Program.Failed). Rather than
     /// guard every allocation, the screenshot goes to disk without asking,
-    /// a warning says where, and the editor closes once it is accepted. If
-    /// nothing could be written it stays open instead: closing would lose the
-    /// screenshot with no copy anywhere.
+    /// a warning says where, and the editor closes once it is accepted.
+    ///
+    /// If it cannot be written, the drive decides the question: full, and
+    /// another folder is offered; not full, so the disk has errors, said so,
+    /// and another folder is offered all the same. Declining closes the
+    /// editor without it.
     ///
     /// Always a new file, never one that exists (an opened file, or this
     /// session's own save): a write cut short by the same shortage must not
@@ -967,10 +970,47 @@ sealed class Editor : Form
     /// other editor's work with it.
     public void Rescue()
     {
-        string said;
+        var said = "ScreenX ran out of memory. The screenshot was not saved.";
         try
         {
             var target = path == null ? NewName() : Beside(path);
+            while (!TrySave(target, ref said))
+            {
+                var folder = Path.GetDirectoryName(target)!;
+                var question = Full(target)
+                    ? $"ScreenX ran out of memory, and the drive {Path.GetPathRoot(target)} is too full to save the screenshot."
+                    : $"ScreenX ran out of memory and could not save the screenshot in {folder}, though the drive has room, so it may have errors ({said}).";
+                if (MessageBox.Show(this, question + "\n\nChoose another folder to save it in?", "ScreenX",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes
+                    || SettingsWindow.Pick(folder, this) is not { } chosen)
+                {
+                    said = "ScreenX ran out of memory. The screenshot was not saved.";
+                    break;
+                }
+                target = Tray.UniquePath(chosen, Path.GetFileNameWithoutExtension(target), Path.GetExtension(target));
+            }
+        }
+        catch (Exception e)
+        {
+            said = $"ScreenX ran out of memory and could not save the screenshot: {e.Message}";
+        }
+        try
+        {
+            MessageBox.Show(this, said + "\n\nThis editor will now close.", "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            dirty = false;
+            Close();
+        }
+    }
+
+    /// The edited image, or if that cannot be drawn or written the capture as
+    /// it arrived. False, with the reason in `said`, if neither was written.
+    bool TrySave(string target, ref string said)
+    {
+        try
+        {
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             try
             {
@@ -980,22 +1020,31 @@ sealed class Editor : Form
             }
             catch (Exception)
             {
-                // The edits could not be drawn or written: the capture as it
-                // arrived, which needs nothing new but the encoder.
                 original.Save(target, FormatFor(target));
                 said = $"ScreenX ran out of memory. The screenshot was saved as {target}, as captured: your edits could not be kept.";
             }
+            return true;
         }
         catch (Exception e)
         {
-            MessageBox.Show(this, $"ScreenX ran out of memory and could not save the screenshot: {e.Message}\n\n"
-                + "The editor stays open. Close other programs, then Save or Copy.",
-                "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            said = e.Message;
+            return false;
         }
-        MessageBox.Show(this, said + "\n\nThis editor will now close.", "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        dirty = false;
-        Close();
+    }
+
+    /// Less room than the image would take uncompressed, with a megabyte to
+    /// spare. A share or anything else DriveInfo cannot read counts as not
+    /// full, so its failure is reported as an error rather than as space.
+    bool Full(string target)
+    {
+        try
+        {
+            return new DriveInfo(Path.GetPathRoot(target)!).AvailableFreeSpace < (long)original.Width * original.Height * 4 + (1 << 20);
+        }
+        catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     string? Target()
