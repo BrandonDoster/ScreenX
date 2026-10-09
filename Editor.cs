@@ -333,12 +333,15 @@ sealed class Editor : Form
     // History. A snapshot is the shape list and the crop, never pixels, so it
     // costs a few hundred bytes however large the capture is.
 
+    /// Rebuilt before the push: the push copies every shape, and if that
+    /// copy runs out of memory the canvas still matches the editor; only the
+    /// undo step is missing.
     void Commit()
     {
-        history.Push(shapes, crop, cuts);
         dirty = true;
         status.Text = "";
         Rebuild();
+        history.Push(shapes, crop, cuts);
         UpdateBar();
     }
 
@@ -351,9 +354,19 @@ sealed class Editor : Form
     bool Restore(bool changes = true)
     {
         var cutsChanged = history.Cuts != cuts;
-        // First, so a failure leaves shapes and crop matching the image.
+        // Every copy before anything changes, so running out of memory
+        // part way leaves the editor as it was: the shapes, then the image.
+        List<Shape> restored;
+        Rectangle restoredCrop;
+        try
+        {
+            (restored, restoredCrop) = history.Current;
+        }
+        catch (OutOfMemoryException)
+        {
+            return false;
+        }
         if (!Recut(history.Cuts)) return false;
-        var (restored, restoredCrop) = history.Current;
         shapes = restored;
         var cropChanged = crop != restoredCrop;
         crop = restoredCrop;
@@ -409,19 +422,22 @@ sealed class Editor : Form
     }
 
     /// Takes the band out of the image and closes the gap, carrying shapes
-    /// and the crop across it. The image first: if it cannot be made, the
-    /// shapes and crop stay where they were.
+    /// and the crop across it. Shapes are copied first and the image made
+    /// second, so if either runs out of memory nothing has moved.
     void CutOut(Cut cut)
     {
         pending = null;
+        var shifted = cut.Shift(shapes);
         if (!Recut([.. cuts, cut])) return;
-        shapes = cut.Shift(shapes);
+        shapes = shifted;
         crop = cut.Shift(crop);
         Commit();
         SetZoom(zoom);
     }
 
-    /// Never throws: after a cut changes the size it makes a new cache, and
+    /// Does not throw for running out of memory or a GDI+ failure (anything
+    /// else is a bug and is left to surface): after a cut changes the size
+    /// it makes a new cache, and
     /// drawing can need memory too (redaction locks the pixels it reads).
     /// Running out must not escape a click or a key, or history and the
     /// image fall out of step. The cache is then left null (paint shows
