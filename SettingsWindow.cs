@@ -240,7 +240,7 @@ sealed class SettingsWindow : Form
 
     static ProcessStartInfo Picker(string start) => new(Environment.ProcessPath!)
     {
-        ArgumentList = { "--pick-folder", start },
+        ArgumentList = { "--pick-folder", start, Environment.ProcessId.ToString() },
         RedirectStandardOutput = true,
         // Both ends agree on UTF-8, or a folder name outside ASCII comes back garbled.
         StandardOutputEncoding = System.Text.Encoding.UTF8,
@@ -279,7 +279,7 @@ sealed class SettingsWindow : Form
         }
     }
 
-    /// `ScreenX.exe --pick-folder <start>`: the picker on its own, printing
+    /// `ScreenX.exe --pick-folder <start> <parent pid>`: the picker on its own, printing
     /// the chosen folder.
     public static int PickFolder(string start)
     {
