@@ -956,7 +956,9 @@ sealed class Editor : Form
 
     /// Out of memory with this editor open (see Program.Failed). Rather than
     /// guard every allocation, the screenshot goes to disk without asking,
-    /// a warning says where, and the editor closes once it is accepted.
+    /// a warning says where, and the editor closes once it is accepted. If
+    /// nothing could be written it stays open instead: closing would lose the
+    /// screenshot with no copy anywhere.
     ///
     /// Always a new file, never one that exists (an opened file, or this
     /// session's own save): a write cut short by the same shortage must not
@@ -986,7 +988,10 @@ sealed class Editor : Form
         }
         catch (Exception e)
         {
-            said = $"ScreenX ran out of memory and could not save the screenshot: {e.Message}";
+            MessageBox.Show(this, $"ScreenX ran out of memory and could not save the screenshot: {e.Message}\n\n"
+                + "The editor stays open. Close other programs, then Save or Copy.",
+                "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
         }
         MessageBox.Show(this, said + "\n\nThis editor will now close.", "ScreenX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         dirty = false;
