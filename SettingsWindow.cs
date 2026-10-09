@@ -166,18 +166,44 @@ sealed class SettingsWindow : Form
 
     string? warned;
 
-    /// A share (\\host\share, WebDAV's \\host@SSL\...) or a mapped network drive.
-    internal static bool OnNetwork(string folder)
+    /// A share (\\host\share, WebDAV's \\host@SSL\...), a mapped network
+    /// drive, or a local folder that is a link to one (Windows follows
+    /// local-to-remote symbolic links).
+    internal static bool OnNetwork(string folder) => OnNetwork(folder, 0);
+
+    static bool OnNetwork(string folder, int depth)
     {
+        if (depth > 8) return false; // a loop of links
         folder = folder.Replace('/', '\\');
         if (folder.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)
-            || folder.StartsWith(@"\\.\UNC\", StringComparison.OrdinalIgnoreCase)) return true;
+            || folder.StartsWith(@"\\.\UNC\", StringComparison.OrdinalIgnoreCase)
+            || folder.StartsWith(@"\??\UNC\", StringComparison.OrdinalIgnoreCase)) return true; // a link's raw target
         if (folder.StartsWith(@"\\?\") || folder.StartsWith(@"\\.\")) folder = folder[4..];
         if (folder.StartsWith(@"\\")) return true;
+        // "C:foo" and "..": resolved as text, as Windows will (no disk access).
+        try { folder = Path.GetFullPath(folder); } catch (ArgumentException) { return false; }
         var root = Path.GetPathRoot(folder);
         if (string.IsNullOrEmpty(root)) return false;
-        try { return new DriveInfo(root).DriveType == DriveType.Network; }
-        catch (ArgumentException) { return false; }
+        try
+        {
+            if (new DriveInfo(root).DriveType == DriveType.Network) return true;
+            // The folder or any parent may be a link. Walked from the root
+            // down, stopping at the first link: Windows follows links in the
+            // middle of a path, so checking C:\links\share\2026 first would
+            // reach the share behind "share". A link's own attributes and
+            // target are read without following it.
+            var parts = folder[root.Length..].Split('\\', StringSplitOptions.RemoveEmptyEntries);
+            var at = root;
+            for (var k = 0; k < parts.Length; k++)
+            {
+                at = Path.Combine(at, parts[k]);
+                if (!Directory.Exists(at)) return false;
+                if (new DirectoryInfo(at).LinkTarget is string target)
+                    return OnNetwork(Path.Combine(Path.GetFullPath(target, Path.GetDirectoryName(at)!), string.Join('\\', parts[(k + 1)..])), depth + 1);
+            }
+            return false;
+        }
+        catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException) { return false; }
     }
 
     /// The same combination written differently ("ctrl+shift+q", "Shift+Control+Q").
@@ -228,7 +254,9 @@ sealed class SettingsWindow : Form
         {
             Description = "Where ScreenX saves screenshots",
             UseDescriptionForTitle = true,
-            InitialDirectory = Directory.Exists(start) ? start : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+            // Not a network folder: checking it would reach the share, and
+            // send your sign-in, before Save has warned about it.
+            InitialDirectory = !OnNetwork(start) && Directory.Exists(start) ? start : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
         };
         if (dialog.ShowDialog() != DialogResult.OK) return 1;
         Console.OutputEncoding = System.Text.Encoding.UTF8;

@@ -507,6 +507,37 @@ public class SettingsWindowTests
     [InlineData(@"\\?\C:\Shots", false)]
     public void Network_folders_are_recognised(string folder, bool network) =>
         Assert.Equal(network, SettingsWindow.OnNetwork(folder));
+
+    /// A local folder, or a folder inside one, that links to a share. Making a
+    /// symbolic link needs Developer Mode or admin; without it this checks
+    /// only that a junction to a local folder is not taken for one.
+    [Fact]
+    public void A_link_to_a_share_is_on_the_network()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"screenx-{Guid.NewGuid():N}");
+        var junction = Path.Combine(root, "junction");
+        Directory.CreateDirectory(Path.Combine(root, "local"));
+        try
+        {
+            using (var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                Path.Combine(Environment.SystemDirectory, "cmd.exe")) { ArgumentList = { "/c", "mklink", "/J", junction, Path.Combine(root, "local") }, CreateNoWindow = true }))
+            {
+                mklink!.WaitForExit();
+                Assert.Equal(0, mklink.ExitCode);
+            }
+            Assert.False(SettingsWindow.OnNetwork(Path.Combine(junction, "shots")));
+            try { Directory.CreateSymbolicLink(Path.Combine(root, "share"), @"\\nas\shots"); }
+            catch (IOException) { return; }
+            catch (UnauthorizedAccessException) { return; }
+            Assert.True(SettingsWindow.OnNetwork(Path.Combine(root, "share", "2026")));
+        }
+        finally
+        {
+            // The link itself, not through it.
+            if (Directory.Exists(junction)) Directory.Delete(junction);
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
 
 public class AfterCaptureTests
