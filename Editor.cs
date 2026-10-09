@@ -826,7 +826,9 @@ sealed class Editor : Form
         // No cache only if making one ran out of memory. Not retried here: a
         // retry that fails invalidates, which would repaint forever.
         if (cache == null)
-            TextRenderer.DrawText(g, "Not enough memory to show this image. Click to try again.", Font, view, Ink,
+            // The visible canvas, not the image's area: zoomed or scrolled,
+            // the middle of that can be off screen.
+            TextRenderer.DrawText(g, "Not enough memory to show this image. Click to try again.", Font, canvas.ClientRectangle, Ink,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         else if (!clip.IsEmpty)
         {
