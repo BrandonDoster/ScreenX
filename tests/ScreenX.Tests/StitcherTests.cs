@@ -268,11 +268,6 @@ public class StitcherTests
             Assert.Equal(Stitcher.Result.Added, stitcher.Add(Window(o)));
             Assert.Equal(110, stitcher.LastShift);
         }
-        // Below the first frame, the sidebar is one colour rather than its
-        // icons over and over.
-        var image = stitcher.Compose();
-        var sidebarRow = image.AsSpan((View + 100) * Width * 3, 96);
-        Assert.False(sidebarRow.ContainsAnyExcept(sidebarRow[0]), "the sidebar was repeated, not continued");
     }
 
     /// A notification in the bottom corner and a scrollbar track along the
@@ -467,36 +462,9 @@ public class StitcherTests
         Assert.True(SamePage(image, page, 0, 970 + View), "content in a once-blank strip was lost");
     }
 
-    /// A still panel that highlights the current heading as the page scrolls.
-    /// Any change used to count as moving, and the panel's rows repeated.
-    [Fact]
-    public void A_panel_with_a_moving_highlight_is_still_a_sidebar()
-    {
-        const int sidebar = 100;
-        var page = Page(1600, seed: 31);
-        var icons = Page(View, seed: 32);
-        uint[] Window(int offset, int highlight)
-        {
-            var width = Width * 3;
-            var frame = new uint[View * width];
-            for (var y = 0; y < View; y++)
-            for (var x = 0; x < width; x++)
-                frame[y * width + x] = x < sidebar
-                    ? (y >= highlight && y < highlight + 16 ? 0xFF3060C0 : icons[y * Width + x])
-                    : page[(offset + y) * Width + (x - sidebar) % Width];
-            return frame;
-        }
-        var stitcher = new Stitcher(Width * 3, View, ignoreRight: 0);
-        stitcher.Add(Window(0, 20));
-        for (var step = 1; step <= 5; step++)
-            Assert.Equal(Stitcher.Result.Added, stitcher.Add(Window(step * 110, 20 + step * 20)));
-        var image = stitcher.Compose();
-        var sidebarRow = image.AsSpan((View + 100) * Width * 3, 96);
-        Assert.False(sidebarRow.ContainsAnyExcept(sidebarRow[0]), "the panel was repeated, not continued");
-    }
-
-    /// A still pane and a few long lines that reach into its strip. Whatever
-    /// counts as a sidebar, those lines must not be painted over.
+    /// A still pane and a few long lines that reach into the strip it shares
+    /// with the text. Sidebars used to be painted over with their background,
+    /// and took the content in a shared strip with them.
     [Fact]
     public void Sparse_lines_beside_a_still_pane_are_kept()
     {
@@ -524,7 +492,7 @@ public class StitcherTests
 
     /// A list scrolled by whole rows, with a column that says the same thing
     /// on almost every row ("Yes", a checkbox). Barely changing, it was taken
-    /// for a sidebar and its cells painted over.
+    /// for a sidebar and its cells painted over while sidebars were painted.
     ///
     /// Depends on strip 0 being judged still on the first pair, which the
     /// flat top rows of each cell (from `Page`) bring about. With every cell

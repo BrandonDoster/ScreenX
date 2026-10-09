@@ -62,8 +62,6 @@ sealed class Stitcher
     Rows? last;
     int top, bottom = -1;
     readonly List<uint[]> added = [];
-    /// Per added row, per strip: unchanged since the frame before.
-    readonly List<bool[]> unchanged = [];
     int addedRows;
     int lastShift;
     int expected;
@@ -130,8 +128,8 @@ sealed class Stitcher
         var limit = (int)(Height * MaxStaticShare);
         if (bottom < 0)
         {
-            // A strip still for this long is a sidebar, not a footer: it is
-            // filled with its background in the added rows (see Compose).
+            // A strip still for this long is a sidebar, not a footer: cutting
+            // the band above it would cut the content beside it too.
             still = new bool[strips];
             movedSteps = new int[strips];
             bottom = 0;
@@ -184,18 +182,16 @@ sealed class Stitcher
         if (shift == 0) return Result.End;
         if (shift < 0) return Result.Lost;
 
-        // Whether each strip moved, by looking rather than by whether its own
-        // match succeeded: a strip that is blank in the first pair and gets
-        // long lines later has no match of its own, and was then treated as a
-        // sidebar and painted over. But not on any change at all: a panel that
-        // highlights the current heading, a spinner or a badge then stopped
-        // being a sidebar and its rows repeated down the capture. Moved is
-        // most of what is drawn in the strip changing; content arriving in a
-        // blank strip is all change, a highlight in a still panel is little.
-        // Or what is drawn fitting the scroll as well as it fits standing
-        // still: a list column of the same value on every row ("Yes", a
-        // checkbox) scrolled by whole rows barely changes, and was taken for
-        // a sidebar and painted over. A sidebar's icons do not fit the scroll.
+        // Whether each strip moved, which decides what is a sidebar (left out
+        // of the end vote and of the tail trim). By looking rather than by
+        // whether its own match succeeded: a strip blank in the first pair
+        // that gets long lines later has no match of its own. Not on any
+        // change at all: a panel that highlights the current heading, a
+        // spinner or a badge is still a sidebar. Moved is most of what is
+        // drawn in the strip changing, or what is drawn fitting the scroll as
+        // well as it fits standing still: a list column of the same value on
+        // every row ("Yes", a checkbox) scrolled by whole rows barely changes.
+        // A sidebar's icons do not fit the scroll.
         for (var s = 0; s < strips; s++)
         {
             int changed = 0, kept = 0, fitsStill = 0, fitsScroll = 0;
@@ -214,18 +210,9 @@ sealed class Stitcher
 
         // The new rows are the bottom `shift` rows of this frame's band, just
         // above the footer.
-        var from = Height - bottom - shift;
         var strip = new uint[shift * Width];
-        Array.Copy(frame, from * Width, strip, 0, strip.Length);
+        Array.Copy(frame, (Height - bottom - shift) * Width, strip, 0, strip.Length);
         added.Add(strip);
-        // Which of the new rows sat still in each strip: only those are ever
-        // repainted as a sidebar, so content arriving in a strip taken for
-        // one is kept.
-        var same = new bool[shift * strips];
-        for (var k = 0; k < shift; k++)
-            for (var s = 0; s < strips; s++)
-                same[k * strips + s] = rows.Hashes[s * Height + from + k] == last.Hashes[s * Height + from + k];
-        unchanged.Add(same);
         addedRows += shift;
         lastShift = shift;
         previous = frame;
@@ -557,7 +544,8 @@ sealed class Stitcher
         if (added.Count == 0) return;
         var final = added[^1];
         var model = final.AsSpan(final.Length - Width, used).ToArray();
-        // Sidebars are left out too: Compose repaints them anyway. But some
+        // Sidebars are left out too: their icons repeat in every added row and
+        // would never read as blank. But some
         // strip must be judged, or every row reads as blank: a narrow area
         // with an icon column cut a capture from 1173 rows to 324.
         var judged = Enumerable.Range(0, Math.Max(1, strips - SideStrips)).Where(s => !Sidebar(s)).ToArray();
@@ -588,14 +576,12 @@ sealed class Stitcher
             if (rows <= cut)
             {
                 added.RemoveAt(added.Count - 1);
-                unchanged.RemoveAt(unchanged.Count - 1);
                 addedRows -= rows;
                 cut -= rows;
             }
             else
             {
                 added[^1] = strip.AsSpan(0, (rows - cut) * Width).ToArray();
-                unchanged[^1] = unchanged[^1][..((rows - cut) * strips)];
                 addedRows -= cut;
                 cut = 0;
             }
@@ -614,34 +600,17 @@ sealed class Stitcher
         var head = Height - footer;
         first.AsSpan(0, head * Width).CopyTo(output);
         var at = head * Width;
-        // A sidebar never moved, so every added row of it is the same icons
-        // again: a column of repeated activity-bar buttons down the image. It
-        // is continued as its own background instead.
-        var colours = new uint?[strips];
-        for (var s = 0; s < strips; s++)
-            if (Sidebar(s)) colours[s] = Background(first, s, head);
-        for (var i = 0; i < added.Count; i++)
+        // A sidebar's added rows are its same icons again, repeated down the
+        // image, as ShareX does. They used to be painted over with the
+        // sidebar's background, but a strip straddling a pane edge took the
+        // content beside the pane with it. Repeats can be cropped in the
+        // editor; erased content cannot be got back.
+        foreach (var strip in added)
         {
-            added[i].CopyTo(output[at..]);
-            for (var k = 0; k < added[i].Length / Width; k++, at += Width)
-                for (var s = 0; s < strips; s++)
-                    if (colours[s] is { } colour && unchanged[i][k * strips + s])
-                        output.Slice(at + s * stripWidth, stripWidth).Fill(colour);
+            strip.CopyTo(output[at..]);
+            at += strip.Length;
         }
         previous.AsSpan(head * Width, footer * Width).CopyTo(output[at..]);
-    }
-
-    /// The commonest colour of strip `s` in the top `rows` of `frame`.
-    uint Background(uint[] frame, int s, int rows)
-    {
-        var counts = new Dictionary<uint, int>();
-        for (var y = 0; y < rows; y += 2)
-            for (var x = s * stripWidth; x < (s + 1) * stripWidth; x += 3)
-            {
-                var p = frame[y * Width + x];
-                counts[p] = counts.GetValueOrDefault(p) + 1;
-            }
-        return counts.Count == 0 ? 0xFF000000 : counts.MaxBy(c => c.Value).Key;
     }
 
     public uint[] Compose()

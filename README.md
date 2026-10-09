@@ -24,8 +24,10 @@ two-monitor desktop (5120x1440 + 1920x720), approximate:
   pointer, no overlay.
 - **Scrolling capture** (tray menu, or set a hotkey): choose the area as for a
   region, then ScreenX scrolls it with the mouse wheel and joins the frames
-  into one tall image. A whole window works, VS Code included: a sidebar that
-  does not move, a notification or a status bar appear once. It stops at the
+  into one tall image. A whole window works, VS Code included: a notification
+  or a status bar appears once, and a sidebar that does not move repeats down
+  the image (crop it in the editor) rather than risk painting over content
+  beside it. It stops at the
   end of the page, after three minutes, or on Esc; the mouse stays yours
   while it runs.
 

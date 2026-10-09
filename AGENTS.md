@@ -92,8 +92,10 @@ should refer to Rust, egui, Tauri, `core/` or `app/`.
     same words on every line) must not vote: Notepad locked onto one line
     height that way while the real scroll was six times larger. Header and
     footer are found per strip, with tolerance, or a notification is copied
-    into every added strip; strips that never move are repainted as their
-    background rather than repeated. Verify any change here live against
+    into every added strip. Strips that never move are repeated, as ShareX
+    does, never painted over: painting a sidebar with its background erased
+    the content that shared a strip with it. Repeats can be cropped in the
+    editor; lost content cannot. Verify any change here live against
     Notepad, an Edge page with a sticky header, and VS Code both as a text
     area and as a whole window, long and short files.
 
