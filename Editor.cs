@@ -350,11 +350,15 @@ sealed class Editor : Form
         var cropChanged = crop != restoredCrop;
         crop = restoredCrop;
         selected = null;
-        pending = null;
+        if (pending != null) Uncut();
         if (changes) dirty = true;
+        var cutsChanged = history.Cuts != cuts;
         Recut(history.Cuts);
         Rebuild();
-        if (cropChanged) SetZoom(Fit());
+        // A cut-out undone or redone keeps the zoom, as making it did; a crop
+        // fits the window again, as making it did.
+        if (cutsChanged) SetZoom(zoom);
+        else if (cropChanged) SetZoom(Fit());
         UpdateBar();
     }
 
@@ -515,7 +519,7 @@ sealed class Editor : Form
                 break;
             default:
                 // Dragging elsewhere starts the band again.
-                pending = null;
+                if (pending != null) Uncut();
                 live = new Shape
                 {
                     // A crop or a cut-out is dragged out like a box and never
@@ -596,7 +600,12 @@ sealed class Editor : Form
                 Math.Min(done.Points[0].X, done.Points[1].X), Math.Min(done.Points[0].Y, done.Points[1].Y),
                 Math.Max(done.Points[0].X, done.Points[1].X), Math.Max(done.Points[0].Y, done.Points[1].Y)));
             box.Intersect(crop);
-            if (box.Width < 2 || box.Height < 2) return;
+            if (box.Width < 2 || box.Height < 2)
+            {
+                // Its dashed box was painted live; take it off.
+                canvas.Invalidate();
+                return;
+            }
             crop = box;
             Commit();
             SetZoom(Fit());
