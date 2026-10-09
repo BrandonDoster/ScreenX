@@ -122,7 +122,15 @@ readonly record struct Cut(bool Columns, int At, int Length)
     {
         var xs = Enumerable.Range(0, image.Width).ToList();
         var ys = Enumerable.Range(0, image.Height).ToList();
-        foreach (var c in cuts) (c.Columns ? xs : ys).RemoveRange(c.At, c.Length);
+        foreach (var c in cuts)
+        {
+            var kept = c.Columns ? xs : ys;
+            // Each cut must fit the image as earlier cuts left it and leave
+            // something; Across makes only such cuts, so this is a bug.
+            if (c.At < 0 || c.Length < 1 || c.At + c.Length > kept.Count || c.Length == kept.Count)
+                throw new ArgumentOutOfRangeException(nameof(cuts), c, "A cut must lie inside the image and leave some of it.");
+            kept.RemoveRange(c.At, c.Length);
+        }
         var cut = new Bitmap(xs.Count, ys.Count, image.PixelFormat);
         try
         {

@@ -472,6 +472,24 @@ public class CutTests
         var crop = new Rectangle(50, 30, 100, 80);
         Assert.Equal(new Cut(true, 50, 40), Cut.Across(new(10, 40), new(90, 45), crop));
         Assert.Equal(new Cut(false, 90, 20), Cut.Across(new(60, 90), new(61, 300), crop));
+        // Past the right edge, and from above the top.
+        Assert.Equal(new Cut(true, 60, 90), Cut.Across(new(60, 40), new(200, 45), crop));
+        Assert.Equal(new Cut(false, 30, 20), Cut.Across(new(70, 5), new(72, 50), crop));
+    }
+
+    /// Across never makes these, so they are bugs: refused with a reason, not
+    /// left to fail somewhere inside GDI+.
+    [Theory]
+    [InlineData(true, -1, 2)]
+    [InlineData(true, 6, 2)] // runs past the far edge
+    [InlineData(false, 0, 5)] // the whole height
+    [InlineData(true, 2, 0)]
+    public void A_cut_outside_the_image_or_taking_all_of_it_is_refused(bool columns, int at, int length)
+    {
+        using var image = new Bitmap(7, 5, PixelFormat.Format32bppPArgb);
+        Assert.Throws<ArgumentOutOfRangeException>(() => Cut.Apply(image, [new Cut(columns, at, length)]).Dispose());
+        // A later cut is checked against what earlier ones left: 7 wide, minus 3, is 4.
+        Assert.Throws<ArgumentOutOfRangeException>(() => Cut.Apply(image, [new Cut(true, 0, 3), new Cut(true, 2, 3)]).Dispose());
     }
 
     /// Points sit on pixel edges, so the band's far edge is in it: a box drawn
