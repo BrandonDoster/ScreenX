@@ -92,7 +92,14 @@ static class Program
     {
         if (e.Exception is OutOfMemoryException && Application.OpenForms.OfType<Editor>().ToList() is [_, ..] editors)
         {
-            foreach (var editor in editors) editor.Rescue();
+            foreach (var editor in editors)
+            {
+                // Rescue catches its own failures; this is for the warning
+                // or the close failing too, so the next editor still gets
+                // its turn.
+                try { editor.Rescue(); }
+                catch (Exception) { }
+            }
             return;
         }
         using var dialog = new ThreadExceptionDialog(e.Exception);

@@ -50,7 +50,8 @@ sealed class Editor : Form
     /// pixelated block.
     Bitmap source;
     /// `source` with every committed shape drawn on it, except `live`. Made by
-    /// Rebuild; null only while a cut-out is making a new `source`.
+    /// Rebuild; null between Recut and the Rebuild after it, or after running
+    /// out of memory in between (Rescue then closes the editor).
     Bitmap? cache;
     List<Shape> shapes = [];
     Rectangle crop;
@@ -348,8 +349,10 @@ sealed class Editor : Form
     void Restore(bool changes = true)
     {
         var cutsChanged = history.Cuts != cuts;
-        Recut(history.Cuts);
+        // The shapes are copied before the image changes, so running out of
+        // memory between the two never leaves them out of step for Rescue.
         var (restored, restoredCrop) = history.Current;
+        Recut(history.Cuts);
         shapes = restored;
         var cropChanged = crop != restoredCrop;
         crop = restoredCrop;
@@ -381,7 +384,7 @@ sealed class Editor : Form
     ///
     /// The cache goes first (Rebuild makes it again), and the current cut
     /// once the new one exists: three full images at most. Running out of
-    /// memory is not handled here; see Program.OutOfMemory.
+    /// memory is not handled here; see Program.Failed and Rescue.
     void Recut(Cut[] next)
     {
         if (next == cuts) return;
@@ -397,8 +400,10 @@ sealed class Editor : Form
     void CutOut(Cut cut)
     {
         pending = null;
+        // Shapes copied before the image changes, as in Restore.
+        var shifted = cut.Shift(shapes);
         Recut([.. cuts, cut]);
-        shapes = cut.Shift(shapes);
+        shapes = shifted;
         crop = cut.Shift(crop);
         Commit();
         SetZoom(zoom);
@@ -410,7 +415,7 @@ sealed class Editor : Form
         {
             cache?.Dispose();
             cache = null;
-            cache = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
+            cache = Cut.NewBitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
         }
         using (var g = Graphics.FromImage(cache))
         {
@@ -767,8 +772,8 @@ sealed class Editor : Form
         // Only the part of the image that is inside the repaint is scaled, so
         // a zoomed-in full-screen capture costs what the window shows.
         var clip = Rectangle.Intersect(e.ClipRectangle, view);
-        // No cache only after running out of memory, while the warning that
-        // closes this editor is up and still lets it repaint.
+        // No cache after running out of memory part way through a cut or an
+        // undo: the warning that closes this editor still lets it repaint.
         if (!clip.IsEmpty && cache != null)
         {
             var src = Rectangle.FromLTRB(
@@ -951,29 +956,35 @@ sealed class Editor : Form
 
     /// Out of memory with this editor open (see Program.Failed). Rather than
     /// guard every allocation, the screenshot goes to disk without asking,
-    /// a warning says where, and the editor closes once it is accepted. A
-    /// file it was opened from is never overwritten here.
+    /// a warning says where, and the editor closes once it is accepted.
+    ///
+    /// Always a new file, never one that exists (an opened file, or this
+    /// session's own save): a write cut short by the same shortage must not
+    /// destroy a good screenshot. Catches everything: it runs inside the
+    /// exception handler, where anything escaping ends the process and every
+    /// other editor's work with it.
     public void Rescue()
     {
         string said;
         try
         {
-            var target = savedTo ?? (path == null ? NewName() : Beside(path));
+            var target = path == null ? NewName() : Beside(path);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             try
             {
                 using var image = Export();
                 image.Save(target, FormatFor(target));
+                said = $"ScreenX ran out of memory. The screenshot was saved as {target}.";
             }
-            catch (OutOfMemoryException)
+            catch (Exception)
             {
-                // No memory left to draw the edits: the capture as it arrived.
+                // The edits could not be drawn or written: the capture as it
+                // arrived, which needs nothing new but the encoder.
                 original.Save(target, FormatFor(target));
+                said = $"ScreenX ran out of memory. The screenshot was saved as {target}, as captured: your edits could not be kept.";
             }
-            said = $"ScreenX ran out of memory. The screenshot was saved as {target}.";
         }
-        catch (Exception e) when (e is OutOfMemoryException or IOException or UnauthorizedAccessException
-            or System.Runtime.InteropServices.ExternalException)
+        catch (Exception e)
         {
             said = $"ScreenX ran out of memory and could not save the screenshot: {e.Message}";
         }

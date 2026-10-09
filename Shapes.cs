@@ -131,7 +131,7 @@ readonly record struct Cut(bool Columns, int At, int Length)
                 throw new ArgumentOutOfRangeException(nameof(cuts), c, "A cut must lie inside the image and leave some of it.");
             kept.RemoveRange(c.At, c.Length);
         }
-        var cut = new Bitmap(xs.Count, ys.Count, image.PixelFormat);
+        var cut = NewBitmap(xs.Count, ys.Count, image.PixelFormat);
         using var g = Graphics.FromImage(cut);
         // A straight copy: no blending, no resampling.
         g.CompositingMode = CompositingMode.SourceCopy;
@@ -141,6 +141,22 @@ readonly record struct Cut(bool Columns, int At, int Length)
         foreach (var (fromY, toY, h) in Runs(ys))
             g.DrawImage(image, new Rectangle(toX, toY, w, h), new Rectangle(fromX, fromY, w, h), GraphicsUnit.Pixel);
         return cut;
+    }
+
+    /// GDI+ refuses a large bitmap it has no memory for as "Parameter is not
+    /// valid" (ArgumentException), not out of memory. Sizes here are never
+    /// larger than an image that already exists, so that can only mean
+    /// memory, and it is reported as such for Program.Failed.
+    public static Bitmap NewBitmap(int width, int height, PixelFormat format)
+    {
+        try
+        {
+            return new Bitmap(width, height, format);
+        }
+        catch (ArgumentException e)
+        {
+            throw new OutOfMemoryException($"no memory for a {width} x {height} image", e);
+        }
     }
 
     /// Each stretch of consecutive source indices: where it starts in the
