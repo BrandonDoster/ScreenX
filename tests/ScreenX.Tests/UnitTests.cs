@@ -532,17 +532,31 @@ public class CutTests
         Assert.Equal(Rectangle.FromLTRB(0, 0, 100, 70), rows.Shift(Whole));
     }
 
-    /// Text and steps are one point that draws outward: judged by what they
-    /// cover, so a label anchored in the band but running past it stays.
+    static Shape Label(float x, float y, string text) => new() { Kind = Kind.Text, Width = 4, Points = [new(x, y)], Text = text };
+    static Shape Step(float x, float y) => new() { Kind = Kind.Step, Width = 2, Number = 1, Points = [new(x, y)] }; // radius 16
+
+    /// Text is one point that draws outward: judged by what it covers, so a
+    /// label anchored in the band but running past it stays.
     [Fact]
-    public void Text_and_steps_go_only_when_all_they_cover_is_in_the_band()
+    public void Text_goes_only_when_all_it_covers_is_in_the_band()
     {
         var columns = new Cut(true, 20, 60);
-        var label = new Shape { Kind = Kind.Text, Width = 4, Points = [new(30, 5)], Text = "a label long enough to pass the band" };
-        var step = new Shape { Kind = Kind.Step, Width = 2, Number = 1, Points = [new(50, 40)] }; // radius 16
-        var kept = columns.Shift([label, step]);
-        Assert.Equal(Kind.Text, kept.Single().Kind);
-        Assert.Equal(new PointF(20, 5), kept[0].Points[0]); // anchor lands on the seam
+        var kept = columns.Shift([Label(30, 5, "a label long enough to pass the band"), Label(30, 40, "in")]);
+        Assert.Equal(new PointF(20, 5), kept.Single().Points[0]); // anchor lands on the seam
+        var rows = new Cut(false, 10, 200);
+        Assert.Empty(rows.Shift([Label(5, 20, "short")]));
+        Assert.Single(new Cut(false, 10, 5).Shift([Label(5, 12, "taller than the band")]));
+    }
+
+    /// A step is the point it marks: cut that point and the step goes, even
+    /// with its circle reaching out of the band; keep it and it stays put.
+    [Fact]
+    public void A_step_goes_with_its_point()
+    {
+        var columns = new Cut(true, 20, 60);
+        Assert.Empty(columns.Shift([Step(75, 40)])); // circle reaches 91, past the band
+        var beside = columns.Shift([Step(90, 40)]).Single(); // circle reaches into the band
+        Assert.Equal(new PointF(30, 40), beside.Points[0]);
     }
 }
 

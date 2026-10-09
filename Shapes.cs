@@ -82,11 +82,13 @@ readonly record struct Cut(bool Columns, int At, int Length)
         ? Rectangle.FromLTRB((int)Shift(r.Left), r.Top, (int)Shift(r.Right), r.Bottom)
         : Rectangle.FromLTRB(r.Left, (int)Shift(r.Top), r.Right, (int)Shift(r.Bottom));
 
-    /// Text and steps draw out from one point, so all they cover counts, not
-    /// the point: a label anchored in the band can run well past it.
+    /// Text draws out from one point, so all it covers counts, not the point:
+    /// a label anchored in the band can run well past it. A step is the
+    /// point it marks, so it goes with that point however far its circle
+    /// reaches; kept, it would land on the seam and mark something else.
     bool Holds(Shape s)
     {
-        if (s.Kind is not (Kind.Text or Kind.Step)) return s.Points.All(Contains);
+        if (s.Kind != Kind.Text) return s.Points.All(Contains);
         var b = s.Bounds;
         return Columns ? b.Left >= At && b.Right <= At + Length : b.Top >= At && b.Bottom <= At + Length;
     }
