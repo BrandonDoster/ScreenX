@@ -103,8 +103,12 @@ readonly record struct Cut(bool Columns, int At, int Length)
             if (Holds(s)) continue;
             var moved = s.Clone();
             // A pen stroke loses its samples in the band and joins straight
-            // across the seam. Clamped onto the seam they left stubs along it.
-            if (moved.Kind == Kind.Pen && moved.Points.RemoveAll(Contains) > 0 && moved.Points.Count < 2) continue;
+            // across the seam: clamped onto the seam they drew stubs along it.
+            // Its two ends stay (clamped like any point), so a stroke ending
+            // in the band keeps its ink outside it.
+            if (moved.Kind == Kind.Pen)
+                for (var i = moved.Points.Count - 2; i >= 1; i--)
+                    if (Contains(moved.Points[i])) moved.Points.RemoveAt(i);
             for (var i = 0; i < moved.Points.Count; i++) moved.Points[i] = Shift(moved.Points[i]);
             kept.Add(moved);
         }

@@ -584,15 +584,21 @@ public class CutTests
     }
 
     /// A pen stroke drops its samples in the band rather than piling them on
-    /// the seam, and goes if fewer than two are left to draw.
+    /// the seam, but keeps its ends, so ink outside the band is never lost.
     [Fact]
     public void A_pen_stroke_drops_its_samples_in_the_band()
     {
         var rows = new Cut(false, 20, 10);
-        var across = new Shape { Kind = Kind.Pen, Points = [new(5, 10), new(6, 22), new(7, 28), new(8, 40)] };
-        Assert.Equal([new PointF(5, 10), new PointF(8, 30)], rows.Shift([across]).Single().Points);
-        var mostlyIn = new Shape { Kind = Kind.Pen, Points = [new(5, 22), new(6, 25), new(7, 35)] };
-        Assert.Empty(rows.Shift([mostlyIn]));
+        Shape Pen(params PointF[] points) => new() { Kind = Kind.Pen, Points = [.. points] };
+        Assert.Equal([new PointF(5, 10), new PointF(8, 30)],
+            rows.Shift([Pen(new(5, 10), new(6, 22), new(7, 28), new(8, 40))]).Single().Points);
+        // Starting or ending in the band: the end lands on the seam.
+        Assert.Equal([new PointF(5, 20), new PointF(7, 25)],
+            rows.Shift([Pen(new(5, 22), new(6, 25), new(7, 35))]).Single().Points);
+        Assert.Equal([new PointF(5, 5), new PointF(5, 20)], rows.Shift([Pen(new(5, 5), new(5, 25))]).Single().Points);
+        // Samples on the band's edges count as in it.
+        Assert.Equal([new PointF(5, 10), new PointF(5, 40)],
+            rows.Shift([Pen(new(5, 10), new(5, 20), new(5, 30), new(5, 50))]).Single().Points);
         // Other kinds still clamp to the seam.
         var line = new Shape { Kind = Kind.Line, Points = [new(5, 25), new(5, 40)] };
         Assert.Equal([new PointF(5, 20), new PointF(5, 30)], rows.Shift([line]).Single().Points);
